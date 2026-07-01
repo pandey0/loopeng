@@ -34,6 +34,17 @@ export interface CardDetailEvent {
   createdAt: string;
 }
 
+export interface ActivityEvent {
+  id: number;
+  entityType: string;
+  entityId: string;
+  eventType: string;
+  actorType: string;
+  actorId: string | null;
+  payload: Record<string, unknown>;
+  createdAt: string;
+}
+
 export interface CardDetail extends Card {
   dependsOn: CardDependency[];
   dependents: CardDependency[];
@@ -107,6 +118,15 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ docId, linkType }),
     }),
+
+  listEvents: (params?: { boardId?: string; limit?: number }) => {
+    const qs = new URLSearchParams();
+    if (params?.boardId) qs.set("boardId", params.boardId);
+    if (params?.limit) qs.set("limit", String(params.limit));
+    const query = qs.toString();
+    return request<ActivityEvent[]>(`/events${query ? `?${query}` : ""}`);
+  },
+  eventsStreamUrl: (boardId?: string) => `${API_URL}/events/stream${boardId ? `?boardId=${boardId}` : ""}`,
 
   getTemplate: (docType: "adr" | "rfc" | "skill") =>
     request<{ docType: string; content: string }>(`/docs/templates/${docType}`),
