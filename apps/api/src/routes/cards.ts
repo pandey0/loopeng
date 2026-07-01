@@ -2,7 +2,13 @@ import type { FastifyPluginAsync } from "fastify";
 import { eq } from "drizzle-orm";
 import { applyTransition, wouldCreateCycle } from "@loopeng/board-engine";
 import { cardDependencies, cardDocLinks, cards } from "@loopeng/db";
-import { CardCreateInputSchema, CardTransitionInputSchema, CardDependencySchema, CardDocLinkSchema } from "@loopeng/shared";
+import {
+  CardCreateInputSchema,
+  CardTransitionInputSchema,
+  CardUpdateInputSchema,
+  CardDependencySchema,
+  CardDocLinkSchema,
+} from "@loopeng/shared";
 
 export const cardRoutes: FastifyPluginAsync = async (fastify) => {
   fastify.get("/cards", async (request) => {
@@ -27,6 +33,36 @@ export const cardRoutes: FastifyPluginAsync = async (fastify) => {
       return;
     }
     return card;
+  });
+
+  fastify.patch("/cards/:id", async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const input = CardUpdateInputSchema.parse(request.body);
+    const [card] = await fastify.db
+      .update(cards)
+      .set({ ...input, updatedAt: new Date() })
+      .where(eq(cards.id, id))
+      .returning();
+    if (!card) {
+      reply.status(404).send({ error: "not_found" });
+      return;
+    }
+    return card;
+  });
+
+  fastify.get("/cards/:id/detail", async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const [card] = await fastify.db.select().from(cards).where(eq(cards.id, id));
+    if (!card) {
+      reply.status(404).send({ error: "not_found" });
+      return;
+    }
+    const [dependsOn, dependents, docLinks] = await Promise.all([
+      fastify.db.select().from(cardDependencies).where(eq(cardDependencies.cardId, id)),
+      fastify.db.select().from(cardDependencies).where(eq(cardDependencies.dependsOnCardId, id)),
+      fastify.db.select().from(cardDocLinks).where(eq(cardDocLinks.cardId, id)),
+    ]);
+    return { ...card, dependsOn, dependents, docLinks };
   });
 
   fastify.post("/cards/:id/transition", async (request, reply) => {

@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Column } from "@loopeng/ui";
 import type { Card, CardState } from "@loopeng/shared";
@@ -24,6 +25,7 @@ const PHASE_3_COLUMNS: { state: CardState; title: string }[] = [
 ];
 
 export default function BoardPage() {
+  const router = useRouter();
   const queryClient = useQueryClient();
   const [boardId, setBoardId] = useState<string | null>(null);
 
@@ -87,10 +89,7 @@ export default function BoardPage() {
             title={title}
             cards={byState(state)}
             onDropCard={handleDrop}
-            onCardClick={(card: Card) => {
-              // Phase 1: no card detail page yet — placeholder for now.
-              console.log("card clicked", card.id);
-            }}
+            onCardClick={(card: Card) => router.push(`/card/${card.id}`)}
             renderCardFooter={
               state === "awaiting_approval"
                 ? (card) => (

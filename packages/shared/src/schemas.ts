@@ -95,6 +95,7 @@ export const CardSchema = z.object({
   touchesArchitecture: z.boolean().default(false),
   priority: z.number().int().default(3),
   tags: z.array(z.string()).default([]),
+  acceptanceCriteria: z.array(z.string()).default([]),
   assigneeId: uuid.nullable(),
   agentRoleId: uuid.nullable(),
   worktreeId: uuid.nullable(),
@@ -111,9 +112,27 @@ export const CardCreateInputSchema = z.object({
   riskTier: z.enum(RISK_TIERS).default("low"),
   priority: z.number().int().default(3),
   tags: z.array(z.string()).default([]),
+  acceptanceCriteria: z.array(z.string()).default([]),
   assigneeId: uuid.optional(),
 });
 export type CardCreateInput = z.infer<typeof CardCreateInputSchema>;
+
+export const CardUpdateInputSchema = z
+  .object({
+    title: z.string().min(1),
+    description: z.string().nullable(),
+    cardType: z.enum(CARD_TYPES),
+    riskTier: z.enum(RISK_TIERS),
+    priority: z.number().int(),
+    tags: z.array(z.string()),
+    acceptanceCriteria: z.array(z.string()),
+    assigneeId: uuid.nullable(),
+  })
+  .partial()
+  .refine((input) => Object.keys(input).length > 0, {
+    message: "at least one field must be provided",
+  });
+export type CardUpdateInput = z.infer<typeof CardUpdateInputSchema>;
 
 export const CardTransitionInputSchema = z.object({
   toState: z.enum(CARD_STATES),

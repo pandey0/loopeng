@@ -1,4 +1,10 @@
-import type { Board, Card, CardState, Doc } from "@loopeng/shared";
+import type { Board, Card, CardDependency, CardDocLink, CardState, Doc } from "@loopeng/shared";
+
+export interface CardDetail extends Card {
+  dependsOn: CardDependency[];
+  dependents: CardDependency[];
+  docLinks: CardDocLink[];
+}
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
 
@@ -36,6 +42,20 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ toState, actorType: "user" }),
     }),
+  getCardDetail: (id: string) => request<CardDetail>(`/cards/${id}/detail`),
+  updateCard: (
+    id: string,
+    input: Partial<{
+      title: string;
+      description: string | null;
+      cardType: string;
+      riskTier: string;
+      priority: number;
+      tags: string[];
+      acceptanceCriteria: string[];
+      assigneeId: string | null;
+    }>,
+  ) => request<Card>(`/cards/${id}`, { method: "PATCH", body: JSON.stringify(input) }),
   addCardDependency: (id: string, dependsOnCardId: string, dependencyType: "blocks" | "relates_to" = "blocks") =>
     request(`/cards/${id}/dependencies`, {
       method: "POST",

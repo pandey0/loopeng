@@ -22,6 +22,11 @@ export function buildImplementerPrompt(card: Card, skills: SkillContext[], prior
     "",
     `Card type: ${card.cardType} | Risk tier: ${card.riskTier}`,
     "",
+    "## Acceptance criteria",
+    card.acceptanceCriteria.length
+      ? card.acceptanceCriteria.map((c) => `- ${c}`).join("\n")
+      : "(none specified)",
+    "",
     "## Relevant skill docs",
     skillsBlock,
     ...(priorFailureNote
@@ -43,6 +48,11 @@ export function buildReviewerPrompt(card: Card, diff: string): string {
     "",
     `## Card: ${card.title}`,
     card.description ? card.description : "(no description provided)",
+    "",
+    "## Acceptance criteria",
+    card.acceptanceCriteria.length
+      ? card.acceptanceCriteria.map((c) => `- ${c}`).join("\n")
+      : "(none specified)",
     "",
     "## Diff to review",
     "```diff",

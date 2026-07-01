@@ -93,6 +93,7 @@ export const cards = pgTable("cards", {
   // Matched against docs.tags (array overlap) so agents auto-load relevant
   // Skill docs before a run instead of re-deriving context every time.
   tags: text("tags").array().notNull().default(sql`'{}'::text[]`),
+  acceptanceCriteria: text("acceptance_criteria").array().notNull().default(sql`'{}'::text[]`),
   assigneeId: uuid("assignee_id").references(() => users.id),
   agentRoleId: uuid("agent_role_id").references((): AnyPgColumn => agentRoles.id),
   worktreeId: uuid("worktree_id").references((): AnyPgColumn => worktrees.id),
