@@ -8,10 +8,11 @@ export interface ColumnProps {
   cards: Card[];
   onDropCard?: (cardId: string, toState: CardState) => void;
   onCardClick?: (card: Card) => void;
+  renderCardFooter?: (card: Card) => ReactNode;
   children?: ReactNode;
 }
 
-export function Column({ state, title, cards, onDropCard, onCardClick }: ColumnProps) {
+export function Column({ state, title, cards, onDropCard, onCardClick, renderCardFooter }: ColumnProps) {
   return (
     <div
       onDragOver={(e) => e.preventDefault()}
@@ -37,6 +38,7 @@ export function Column({ state, title, cards, onDropCard, onCardClick }: ColumnP
           onDragStart={(e) => e.dataTransfer.setData("text/card-id", card.id)}
         >
           <CardTile card={card} onClick={onCardClick} draggable={false} />
+          {renderCardFooter?.(card)}
         </div>
       ))}
     </div>

@@ -1,0 +1,22 @@
+{
+  "name": "@loopeng/gates",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@loopeng/connectors": "workspace:*",
+    "@loopeng/db": "workspace:*",
+    "@loopeng/shared": "workspace:*",
+    "@loopeng/worktree-manager": "workspace:*",
+    "drizzle-orm": "^0.36.1",
+    "simple-git": "^3.27.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.3"
+  }
+}

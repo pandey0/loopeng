@@ -36,6 +36,16 @@ export const cardRoutes: FastifyPluginAsync = async (fastify) => {
     reply.send(card);
   });
 
+  // Manual trigger for the Phase 2 autonomous loop — normally cron/event
+  // triggers dispatch cards automatically, but this lets a human (or a
+  // test) force a specific ready card through implementer -> reviewer ->
+  // gate_checks without waiting for a schedule.
+  fastify.post("/cards/:id/dispatch", async (request, reply) => {
+    const { id } = request.params as { id: string };
+    await fastify.orchestrator.coordination.dispatch(id);
+    reply.status(202).send({ dispatched: id });
+  });
+
   fastify.post("/cards/:id/dependencies", async (request, reply) => {
     const { id } = request.params as { id: string };
     const input = CardDependencySchema.omit({ cardId: true }).parse(request.body);

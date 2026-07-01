@@ -94,6 +94,7 @@ export const CardSchema = z.object({
   riskTier: z.enum(RISK_TIERS).default("low"),
   touchesArchitecture: z.boolean().default(false),
   priority: z.number().int().default(3),
+  tags: z.array(z.string()).default([]),
   assigneeId: uuid.nullable(),
   agentRoleId: uuid.nullable(),
   worktreeId: uuid.nullable(),
@@ -109,6 +110,7 @@ export const CardCreateInputSchema = z.object({
   cardType: z.enum(CARD_TYPES).default("feature"),
   riskTier: z.enum(RISK_TIERS).default("low"),
   priority: z.number().int().default(3),
+  tags: z.array(z.string()).default([]),
   assigneeId: uuid.optional(),
 });
 export type CardCreateInput = z.infer<typeof CardCreateInputSchema>;

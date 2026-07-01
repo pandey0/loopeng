@@ -1,5 +1,5 @@
 import { db, pool } from "./client.js";
-import { agentRoles, boards, cards, gateDefinitions } from "./schema.js";
+import { agentRoles, automations, boards, cards, gateDefinitions } from "./schema.js";
 
 async function main() {
   const [board] = await db
@@ -46,11 +46,32 @@ async function main() {
 
   await db.insert(gateDefinitions).values([
     { key: "tests_ci", name: "Tests pass + CI green", blocking: true },
+    { key: "ci_status", name: "CI checks green", blocking: true },
     { key: "security_scan", name: "Security review cleared", blocking: true },
     { key: "docs_adr_linked", name: "Spec doc linked", blocking: true },
     { key: "adr_required", name: "ADR linked if architecture touched", blocking: true },
     { key: "peer_review", name: "Sub-agent peer review passed", blocking: true },
     { key: "deploy_live", name: "Deployed with monitoring wired", blocking: true },
+  ]);
+
+  await db.insert(automations).values([
+    {
+      name: "morning triage",
+      triggerType: "cron",
+      scheduleCron: "0 9 * * *",
+      target: { boardId: board.id },
+      action: { type: "triage_scan" },
+    },
+    {
+      // Single row covers both card.moved -> ready (agent loop dispatch)
+      // and card.moved -> deploying (deploy pipeline dispatch) — the
+      // event-trigger branches on the transition's target state itself.
+      name: "dispatch on ready/deploying",
+      triggerType: "event",
+      eventType: "card.state_changed",
+      target: { boardId: board.id },
+      action: { type: "triage_scan" },
+    },
   ]);
 
   await pool.end();

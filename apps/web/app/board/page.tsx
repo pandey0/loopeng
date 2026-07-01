@@ -7,13 +7,18 @@ import { Column } from "@loopeng/ui";
 import type { Card, CardState } from "@loopeng/shared";
 import { api } from "../../lib/api";
 
-// Phase 1 only exercises this subset of the full card state machine —
-// gate_checks/awaiting_approval/deploying are reserved for Phase 3/4.
-const PHASE_1_COLUMNS: { state: CardState; title: string }[] = [
+// Phase 3 orchestrator now runs the full gate pipeline at gate_checks and
+// routes by risk_tier: high stops at awaiting_approval for a human click,
+// low/medium auto-advance to deploying. deploying stays a dead-end column
+// until Phase 4 (deploy execution) lands.
+const PHASE_3_COLUMNS: { state: CardState; title: string }[] = [
   { state: "backlog", title: "Backlog" },
   { state: "ready", title: "Ready" },
   { state: "in_progress", title: "In Progress" },
   { state: "in_review", title: "In Review" },
+  { state: "gate_checks", title: "Gate Checks" },
+  { state: "awaiting_approval", title: "Awaiting Approval" },
+  { state: "deploying", title: "Deploying" },
   { state: "blocked", title: "Blocked" },
   { state: "done", title: "Done" },
 ];
@@ -53,6 +58,15 @@ export default function BoardPage() {
     }
   }
 
+  async function handleApprove(cardId: string) {
+    try {
+      await api.transitionCard(cardId, "deploying");
+      queryClient.invalidateQueries({ queryKey: ["cards", boardId] });
+    } catch (err) {
+      alert((err as Error).message);
+    }
+  }
+
   return (
     <div>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
@@ -66,7 +80,7 @@ export default function BoardPage() {
         {boardId && <Link href={`/board/${boardId}/graph`}>Dependency graph →</Link>}
       </div>
       <div style={{ display: "flex", gap: 12, overflowX: "auto" }}>
-        {PHASE_1_COLUMNS.map(({ state, title }) => (
+        {PHASE_3_COLUMNS.map(({ state, title }) => (
           <Column
             key={state}
             state={state}
@@ -77,6 +91,18 @@ export default function BoardPage() {
               // Phase 1: no card detail page yet — placeholder for now.
               console.log("card clicked", card.id);
             }}
+            renderCardFooter={
+              state === "awaiting_approval"
+                ? (card) => (
+                    <button
+                      onClick={() => handleApprove(card.id)}
+                      style={{ fontSize: 11, padding: "4px 8px", marginTop: -4, marginBottom: 8, cursor: "pointer" }}
+                    >
+                      Approve → Deploy
+                    </button>
+                  )
+                : undefined
+            }
           />
         ))}
       </div>

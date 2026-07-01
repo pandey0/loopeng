@@ -3,6 +3,8 @@ dist/
 .next/
 .turbo/
 *.log
+*.tsbuildinfo
 .env
 data/wiki-repo/
 data/worktrees/
+data/agent-logs/
