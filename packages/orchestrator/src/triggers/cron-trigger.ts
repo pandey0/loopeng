@@ -1,8 +1,9 @@
 import cron from "node-cron";
 import { and, eq } from "drizzle-orm";
 import { db } from "@loopeng/db";
-import { automationRuns, automations, cards } from "@loopeng/db";
+import { automationRuns, automations, cards, eventLog } from "@loopeng/db";
 import { isReady } from "@loopeng/board-engine";
+import { findStaleDocs } from "@loopeng/doc-engine";
 import type { CoordinationStrategy } from "../coordination/types.js";
 
 async function runTriageScan(automationId: string, target: Record<string, unknown>, coordination: CoordinationStrategy) {
@@ -29,10 +30,38 @@ async function runTriageScan(automationId: string, target: Record<string, unknow
   }
 }
 
+async function runDocDriftScan(automationId: string) {
+  const [run] = await db.insert(automationRuns).values({ automationId, status: "running" }).returning();
+
+  const staleDocs = await findStaleDocs();
+  for (const stale of staleDocs) {
+    await db.insert(eventLog).values({
+      entityType: "doc",
+      entityId: stale.docId,
+      eventType: "doc.drift_detected",
+      actorType: "automation",
+      payload: { cardId: stale.cardId, cardTitle: stale.cardTitle, docSlug: stale.slug },
+    });
+  }
+
+  if (run) {
+    await db
+      .update(automationRuns)
+      .set({
+        status: "succeeded",
+        result: { staleCount: staleDocs.length, staleDocIds: staleDocs.map((d) => d.docId) },
+        finishedAt: new Date(),
+      })
+      .where(eq(automationRuns.id, run.id));
+  }
+}
+
 // Reads the automations table for enabled cron triggers and schedules them
-// with node-cron. Only "triage_scan" is implemented today (dispatch every
-// dependency-unblocked ready card); other action types are logged and
-// skipped so misconfigured rows fail loud instead of silently.
+// with node-cron. "triage_scan" dispatches every dependency-unblocked ready
+// card; "doc_drift_scan" flags docs whose linked card shipped after the doc
+// was last touched (see @loopeng/doc-engine findStaleDocs). Other action
+// types are logged and skipped so misconfigured rows fail loud instead of
+// silently.
 export function startCronTriggers(coordination: CoordinationStrategy): void {
   void (async () => {
     const rows = await db
@@ -46,6 +75,8 @@ export function startCronTriggers(coordination: CoordinationStrategy): void {
       cron.schedule(automation.scheduleCron, () => {
         if (action.type === "triage_scan") {
           void runTriageScan(automation.id, (automation.target as Record<string, unknown>) ?? {}, coordination);
+        } else if (action.type === "doc_drift_scan") {
+          void runDocDriftScan(automation.id);
         } else {
           console.warn(`[orchestrator:cron] automation "${automation.name}" has unsupported action type: ${action.type}`);
         }

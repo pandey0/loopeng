@@ -10,6 +10,7 @@ import { parseDoc, stringifyDoc, type DocFrontmatter } from "./frontmatter.js";
 
 export { GitDocClient, repoRelativePath } from "./git-client.js";
 export * from "./frontmatter.js";
+export * from "./drift.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const TEMPLATES_DIR = path.join(__dirname, "..", "templates");
