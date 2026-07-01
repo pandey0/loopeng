@@ -7,9 +7,15 @@ export interface ExecResult {
   timedOut: boolean;
 }
 
-export function execIn(cwd: string, command: string, args: string[], timeoutMs = 10 * 60 * 1000): Promise<ExecResult> {
+export function execIn(
+  cwd: string,
+  command: string,
+  args: string[],
+  timeoutMs = 10 * 60 * 1000,
+  env?: NodeJS.ProcessEnv,
+): Promise<ExecResult> {
   return new Promise((resolve) => {
-    const child = spawn(command, args, { cwd });
+    const child = spawn(command, args, { cwd, env: env ? { ...process.env, ...env } : process.env });
     let stdout = "";
     let stderr = "";
     let timedOut = false;

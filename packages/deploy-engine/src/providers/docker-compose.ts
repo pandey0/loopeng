@@ -2,8 +2,18 @@ import { simpleGit } from "simple-git";
 import { execIn } from "../exec.js";
 import type { DeployContext, DeployProvider, DeployResult, HealthStatus } from "../types.js";
 
-const API_URL = process.env.DEPLOY_HEALTH_URL ?? `http://localhost:${process.env.API_PORT ?? 4000}`;
+// Resolved once, reused for both the docker build args and the health-check
+// URL — computing these independently (each reading process.env fresh) is
+// exactly how a stale/differing env on some later call baked the wrong port
+// into a production bundle while an earlier call's health check still
+// passed against the right one. Pinned explicitly into the build subprocess
+// env below rather than trusting whatever the caller's ambient env happens
+// to contain at the moment.
+const API_PORT = process.env.API_PORT ?? "4000";
+const WEB_PORT = process.env.WEB_PORT ?? "3000";
+const API_URL = process.env.DEPLOY_HEALTH_URL ?? `http://localhost:${API_PORT}`;
 const COMPOSE_FILE = "infrastructure/docker/docker-compose.yml";
+const BUILD_ENV = { API_PORT, WEB_PORT };
 // api isn't in this list by default: it shells out to git/docker/claude CLI
 // (worktree-manager, deploy-engine itself, packages/agents) which the api
 // image doesn't have installed, so api currently must run natively rather
@@ -64,7 +74,7 @@ export const dockerComposeProvider: DeployProvider = {
     // a git-revert rollback (nothing safe for us to revert).
     const createdNewCommit = mergedSha !== preMergeSha;
 
-    const build = await execIn(ctx.repoRoot, "docker", ["compose", "-f", COMPOSE_FILE, "up", "-d", "--no-deps", "--build", ...COMPOSE_SERVICES], 10 * 60 * 1000);
+    const build = await execIn(ctx.repoRoot, "docker", ["compose", "-f", COMPOSE_FILE, "up", "-d", "--no-deps", "--build", ...COMPOSE_SERVICES], 10 * 60 * 1000, BUILD_ENV);
     if (build.code !== 0) {
       return { status: "failed", createdNewCommit, deployedCommitSha: mergedSha, detail: { step: "docker compose up", code: build.code, stderrTail: build.stderr.slice(-3000) } };
     }
@@ -78,7 +88,7 @@ export const dockerComposeProvider: DeployProvider = {
       status: "live",
       createdNewCommit,
       deployedCommitSha: mergedSha,
-      deployUrl: `http://localhost:${process.env.WEB_PORT ?? 3000}`,
+      deployUrl: `http://localhost:${WEB_PORT}`,
       monitoringDashboardUrl: `${API_URL}/health`,
       detail: { build: "ok", health: health.detail },
     };
@@ -94,7 +104,7 @@ export const dockerComposeProvider: DeployProvider = {
       return { status: "failed", createdNewCommit: false, detail: { step: "revert", error: (err as Error).message, toCommitSha } };
     }
 
-    const build = await execIn(ctx.repoRoot, "docker", ["compose", "-f", COMPOSE_FILE, "up", "-d", "--no-deps", "--build", ...COMPOSE_SERVICES], 10 * 60 * 1000);
+    const build = await execIn(ctx.repoRoot, "docker", ["compose", "-f", COMPOSE_FILE, "up", "-d", "--no-deps", "--build", ...COMPOSE_SERVICES], 10 * 60 * 1000, BUILD_ENV);
     if (build.code !== 0) {
       return { status: "failed", createdNewCommit: false, detail: { step: "docker compose up (rollback)", code: build.code, stderrTail: build.stderr.slice(-3000) } };
     }
