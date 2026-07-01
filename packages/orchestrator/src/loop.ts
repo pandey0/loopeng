@@ -94,7 +94,7 @@ export async function orchestrateCard(cardId: string, hooks: HookRegistry): Prom
 
     await applyTransition({ cardId, toState: "gate_checks", actorType: "agent" });
 
-    const pipelineResult = await runGatePipeline(currentCard, worktree.fsPath);
+    const pipelineResult = await runGatePipeline(currentCard, worktree.fsPath, worktree.baseCommitSha);
     await hooks.fire("afterGateRun", { cardId, gate: "pipeline", passed: pipelineResult.allPassed, results: pipelineResult.results });
 
     if (!pipelineResult.allPassed) {

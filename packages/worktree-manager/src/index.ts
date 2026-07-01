@@ -102,7 +102,12 @@ export async function getActiveWorktree(cardId: string) {
   return worktree ?? null;
 }
 
-export function getRepoDiff(fsPath: string): Promise<string> {
+// Bare `git diff` (no args) only shows uncommitted changes — working tree
+// vs index. An implementer that follows instructions and commits its work
+// leaves a clean tree, so that call is empty on every well-behaved run.
+// Diffing against the worktree's own base commit shows everything the
+// agent actually did, committed or not.
+export function getRepoDiff(fsPath: string, baseRef: string): Promise<string> {
   const git = simpleGit(fsPath);
-  return git.diff();
+  return git.diff([`${baseRef}...HEAD`]);
 }

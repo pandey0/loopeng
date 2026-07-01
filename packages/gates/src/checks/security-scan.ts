@@ -46,7 +46,7 @@ export const securityScanGate: GateCheck = {
   },
 
   async run(ctx: GateContext): Promise<GateOutcome> {
-    const diff = await getRepoDiff(ctx.worktreePath);
+    const diff = await getRepoDiff(ctx.worktreePath, ctx.baseCommitSha);
     const secretFindings = scanDiffForSecrets(diff);
     const audit = await auditDependencies(ctx.worktreePath);
 

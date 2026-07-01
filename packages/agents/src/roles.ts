@@ -87,7 +87,7 @@ export async function runReviewerAgent(card: Card): Promise<ReviewerRunResult> {
   if (!worktree) throw new Error(`no active worktree for card ${card.id}`);
 
   const roleId = await getRoleId("reviewer");
-  const diff = await getRepoDiff(worktree.fsPath);
+  const diff = await getRepoDiff(worktree.fsPath, worktree.baseCommitSha);
   const prompt = buildReviewerPrompt(card, diff);
 
   const [run] = await db

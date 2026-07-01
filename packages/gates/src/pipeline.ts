@@ -20,7 +20,7 @@ export interface GatePipelineResult {
 // each phase owns writing its own gate_results.
 const PIPELINE_OWNED_KEYS_EXCLUDED = ["peer_review", "deploy_live"];
 
-export async function runGatePipeline(card: CardRow, worktreePath: string): Promise<GatePipelineResult> {
+export async function runGatePipeline(card: CardRow, worktreePath: string, baseCommitSha: string): Promise<GatePipelineResult> {
   const definitions = await db.select().from(gateDefinitions).where(eq(gateDefinitions.enabled, true));
   const connectors = await loadConnectorRegistry();
   const checksByKey = new Map(allGates().map((g) => [g.key, g]));
@@ -36,7 +36,7 @@ export async function runGatePipeline(card: CardRow, worktreePath: string): Prom
       continue;
     }
 
-    const ctx = { card, worktreePath, connectors, config: (def.config as Record<string, unknown>) ?? {} };
+    const ctx = { card, worktreePath, baseCommitSha, connectors, config: (def.config as Record<string, unknown>) ?? {} };
     const applies = await check.appliesTo(ctx);
     const outcome: GateOutcome = applies
       ? await check.run(ctx)

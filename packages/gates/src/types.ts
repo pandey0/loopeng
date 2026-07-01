@@ -6,6 +6,7 @@ export type CardRow = typeof cards.$inferSelect;
 export interface GateContext {
   card: CardRow;
   worktreePath: string;
+  baseCommitSha: string;
   connectors: ConnectorRegistry;
   config: Record<string, unknown>;
 }
