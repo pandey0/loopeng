@@ -69,10 +69,17 @@ export const eventRoutes: FastifyPluginAsync = async (fastify) => {
   fastify.get("/events/stream", async (request, reply) => {
     const { boardId, entityType } = request.query as EventQuery;
 
+    // reply.hijack() takes the response out of Fastify's normal pipeline, so
+    // the @fastify/cors plugin's onSend hook never runs for this route --
+    // headers have to be set manually here, mirroring corsPlugin's own
+    // origin:true (reflect request Origin) vs "*" behavior.
+    const corsOrigin = process.env.NEXT_PUBLIC_API_URL ? (request.headers.origin ?? "*") : "*";
     reply.raw.writeHead(200, {
       "Content-Type": "text/event-stream",
       "Cache-Control": "no-cache",
       Connection: "keep-alive",
+      "Access-Control-Allow-Origin": corsOrigin,
+      Vary: "Origin",
     });
     reply.hijack();
 
