@@ -1,5 +1,5 @@
 import cron from "node-cron";
-import { and, eq } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 import { db } from "@loopeng/db";
 import { automationRuns, automations, cards, eventLog } from "@loopeng/db";
 import { isReady } from "@loopeng/board-engine";
@@ -30,11 +30,30 @@ async function runTriageScan(automationId: string, target: Record<string, unknow
   }
 }
 
+// A doc counts as "already flagged" (skip re-inserting) if its most recent
+// doc.drift_detected event is still newer than the doc's last update — i.e.
+// nothing has changed since we last flagged it. If the doc was touched
+// again after that event, this is a fresh staleness window worth a new
+// event, so re-running the scan doesn't spam duplicates but still re-flags
+// genuinely new drift.
+async function isAlreadyFlagged(stale: Awaited<ReturnType<typeof findStaleDocs>>[number]): Promise<boolean> {
+  const [lastEvent] = await db
+    .select()
+    .from(eventLog)
+    .where(and(eq(eventLog.entityType, "doc"), eq(eventLog.entityId, stale.docId), eq(eventLog.eventType, "doc.drift_detected")))
+    .orderBy(desc(eventLog.createdAt))
+    .limit(1);
+  if (!lastEvent) return false;
+  return lastEvent.createdAt >= stale.docLastVerifiedAt;
+}
+
 async function runDocDriftScan(automationId: string) {
   const [run] = await db.insert(automationRuns).values({ automationId, status: "running" }).returning();
 
   const staleDocs = await findStaleDocs();
+  let flagged = 0;
   for (const stale of staleDocs) {
+    if (await isAlreadyFlagged(stale)) continue;
     await db.insert(eventLog).values({
       entityType: "doc",
       entityId: stale.docId,
@@ -42,6 +61,7 @@ async function runDocDriftScan(automationId: string) {
       actorType: "automation",
       payload: { cardId: stale.cardId, cardTitle: stale.cardTitle, docSlug: stale.slug },
     });
+    flagged++;
   }
 
   if (run) {
@@ -49,7 +69,7 @@ async function runDocDriftScan(automationId: string) {
       .update(automationRuns)
       .set({
         status: "succeeded",
-        result: { staleCount: staleDocs.length, staleDocIds: staleDocs.map((d) => d.docId) },
+        result: { staleCount: staleDocs.length, newlyFlagged: flagged },
         finishedAt: new Date(),
       })
       .where(eq(automationRuns.id, run.id));
