@@ -1,0 +1,1 @@
+ALTER TABLE "cards" ADD COLUMN "acceptance_criteria" text[] DEFAULT '{}'::text[] NOT NULL;
