@@ -8,6 +8,12 @@ COPY packages/shared/package.json packages/shared/package.json
 COPY packages/db/package.json packages/db/package.json
 COPY packages/doc-engine/package.json packages/doc-engine/package.json
 COPY packages/board-engine/package.json packages/board-engine/package.json
+COPY packages/worktree-manager/package.json packages/worktree-manager/package.json
+COPY packages/connectors/package.json packages/connectors/package.json
+COPY packages/agents/package.json packages/agents/package.json
+COPY packages/gates/package.json packages/gates/package.json
+COPY packages/deploy-engine/package.json packages/deploy-engine/package.json
+COPY packages/orchestrator/package.json packages/orchestrator/package.json
 COPY apps/api/package.json apps/api/package.json
 RUN pnpm install --no-frozen-lockfile
 
@@ -17,6 +23,12 @@ COPY packages/shared packages/shared
 COPY packages/db packages/db
 COPY packages/doc-engine packages/doc-engine
 COPY packages/board-engine packages/board-engine
+COPY packages/worktree-manager packages/worktree-manager
+COPY packages/connectors packages/connectors
+COPY packages/agents packages/agents
+COPY packages/gates packages/gates
+COPY packages/deploy-engine packages/deploy-engine
+COPY packages/orchestrator packages/orchestrator
 COPY apps/api apps/api
 WORKDIR /repo/apps/api
 EXPOSE 4000
