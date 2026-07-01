@@ -34,33 +34,40 @@ export const dockerComposeProvider: DeployProvider = {
     const git = simpleGit(ctx.repoRoot);
     const currentBranch = (await git.revparse(["--abbrev-ref", "HEAD"])).trim();
     if (currentBranch !== ctx.baseBranch) {
-      return { status: "failed", detail: { reason: `repo not on base branch (on "${currentBranch}", expected "${ctx.baseBranch}")` } };
+      return { status: "failed", createdNewCommit: false, detail: { reason: `repo not on base branch (on "${currentBranch}", expected "${ctx.baseBranch}")` } };
     }
 
     const status = await git.status();
     if (!status.isClean()) {
-      return { status: "failed", detail: { reason: "repo has uncommitted changes, refusing to merge", files: status.files.map((f) => f.path) } };
+      return { status: "failed", createdNewCommit: false, detail: { reason: "repo has uncommitted changes, refusing to merge", files: status.files.map((f) => f.path) } };
     }
 
+    const preMergeSha = (await git.revparse(["HEAD"])).trim();
     try {
       await git.merge(["--no-ff", ctx.worktree.branchName, "-m", `merge: ${ctx.card.title} (card ${ctx.card.id.slice(0, 8)})`]);
     } catch (err) {
-      return { status: "failed", detail: { step: "merge", error: (err as Error).message } };
+      return { status: "failed", createdNewCommit: false, detail: { step: "merge", error: (err as Error).message } };
     }
     const mergedSha = (await git.revparse(["HEAD"])).trim();
+    // Branch was already an ancestor of HEAD (e.g. re-merged after an
+    // earlier revert) — --no-ff still no-ops with nothing new to merge.
+    // We don't own any new commit here, so a failure below must not trigger
+    // a git-revert rollback (nothing safe for us to revert).
+    const createdNewCommit = mergedSha !== preMergeSha;
 
     const build = await execIn(ctx.repoRoot, "docker", ["compose", "-f", COMPOSE_FILE, "up", "-d", "--build"], 10 * 60 * 1000);
     if (build.code !== 0) {
-      return { status: "failed", detail: { step: "docker compose up", code: build.code, stderrTail: build.stderr.slice(-3000) } };
+      return { status: "failed", createdNewCommit, deployedCommitSha: mergedSha, detail: { step: "docker compose up", code: build.code, stderrTail: build.stderr.slice(-3000) } };
     }
 
     const health = await pollHealth(ctx, 90 * 1000);
     if (!health.healthy) {
-      return { status: "failed", detail: { step: "health check", ...health.detail, deployedCommitSha: mergedSha } };
+      return { status: "failed", createdNewCommit, deployedCommitSha: mergedSha, detail: { step: "health check", ...health.detail } };
     }
 
     return {
       status: "live",
+      createdNewCommit,
       deployedCommitSha: mergedSha,
       deployUrl: `http://localhost:${process.env.WEB_PORT ?? 3000}`,
       monitoringDashboardUrl: `${API_URL}/health`,
@@ -75,18 +82,19 @@ export const dockerComposeProvider: DeployProvider = {
     try {
       await git.raw(["revert", "--no-edit", "-m", "1", "HEAD"]);
     } catch (err) {
-      return { status: "failed", detail: { step: "revert", error: (err as Error).message, toCommitSha } };
+      return { status: "failed", createdNewCommit: false, detail: { step: "revert", error: (err as Error).message, toCommitSha } };
     }
 
     const build = await execIn(ctx.repoRoot, "docker", ["compose", "-f", COMPOSE_FILE, "up", "-d", "--build"], 10 * 60 * 1000);
     if (build.code !== 0) {
-      return { status: "failed", detail: { step: "docker compose up (rollback)", code: build.code, stderrTail: build.stderr.slice(-3000) } };
+      return { status: "failed", createdNewCommit: false, detail: { step: "docker compose up (rollback)", code: build.code, stderrTail: build.stderr.slice(-3000) } };
     }
 
     const health = await pollHealth(ctx, 90 * 1000);
     const revertedSha = (await git.revparse(["HEAD"])).trim();
     return {
       status: health.healthy ? "live" : "failed",
+      createdNewCommit: false,
       deployedCommitSha: revertedSha,
       detail: { rolledBackTo: toCommitSha, health: health.detail },
     };

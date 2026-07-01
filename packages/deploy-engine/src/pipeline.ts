@@ -73,31 +73,42 @@ export async function runDeployPipeline(cardId: string, provider: DeployProvider
     return { status: "done" };
   }
 
-  // Deploy failed post-merge — roll back to the pre-merge commit so base
-  // branch isn't left broken, then park the card for a human.
-  const rollback = await provider.rollback(ctx, preDeploySha);
-  await db
-    .update(deployRecords)
-    .set({
-      status: rollback.status === "live" ? "rolled_back" : "failed",
-      deployedCommitSha: rollback.deployedCommitSha,
-      finishedAt: new Date(),
-    })
-    .where(eq(deployRecords.id, deployRecord.id));
+  // Deploy failed. Only roll back via git-revert if this run actually
+  // created a new commit — otherwise HEAD isn't ours to revert (e.g. the
+  // card's branch was already merged in a prior run) and reverting it would
+  // discard unrelated history.
+  let rollbackDetail: Record<string, unknown> = { skipped: "no new commit was created this run, nothing to revert" };
+  if (result.createdNewCommit) {
+    const rollback = await provider.rollback(ctx, preDeploySha);
+    rollbackDetail = rollback.detail;
+    await db
+      .update(deployRecords)
+      .set({
+        status: rollback.status === "live" ? "rolled_back" : "failed",
+        deployedCommitSha: rollback.deployedCommitSha,
+        finishedAt: new Date(),
+      })
+      .where(eq(deployRecords.id, deployRecord.id));
 
-  if (rollback.status === "live") {
-    await db.insert(deployRecords).values({
-      cardId,
-      environment: "production",
-      status: "rolled_back",
-      deployedCommitSha: rollback.deployedCommitSha,
-      rollbackOfDeployId: deployRecord.id,
-      startedAt: new Date(),
-      finishedAt: new Date(),
-    });
+    if (rollback.status === "live") {
+      await db.insert(deployRecords).values({
+        cardId,
+        environment: "production",
+        status: "rolled_back",
+        deployedCommitSha: rollback.deployedCommitSha,
+        rollbackOfDeployId: deployRecord.id,
+        startedAt: new Date(),
+        finishedAt: new Date(),
+      });
+    }
+  } else {
+    await db
+      .update(deployRecords)
+      .set({ status: "failed", finishedAt: new Date() })
+      .where(eq(deployRecords.id, deployRecord.id));
   }
 
-  await recordDeployLiveGate(cardId, false, { deployFailure: result.detail, rollback: rollback.detail });
+  await recordDeployLiveGate(cardId, false, { deployFailure: result.detail, rollback: rollbackDetail });
   await applyTransition({ cardId, toState: "blocked", actorType: "automation" });
   return { status: "blocked" };
 }

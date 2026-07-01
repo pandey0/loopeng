@@ -15,6 +15,12 @@ export interface DeployResult {
   deployedCommitSha?: string;
   deployUrl?: string;
   monitoringDashboardUrl?: string;
+  // True only if this call created a brand new commit on the base branch
+  // (a real merge). If the card's branch was already an ancestor of HEAD
+  // (e.g. re-merged after an earlier revert), this is false — rollback must
+  // never git-revert HEAD in that case, since HEAD wouldn't be a commit we
+  // own and reverting it would touch unrelated history.
+  createdNewCommit: boolean;
   detail: Record<string, unknown>;
 }
 
