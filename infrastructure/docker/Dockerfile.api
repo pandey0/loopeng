@@ -1,0 +1,23 @@
+FROM node:20-alpine AS base
+RUN corepack enable && corepack prepare pnpm@9.12.0 --activate
+WORKDIR /repo
+
+FROM base AS deps
+COPY package.json pnpm-workspace.yaml tsconfig.base.json ./
+COPY packages/shared/package.json packages/shared/package.json
+COPY packages/db/package.json packages/db/package.json
+COPY packages/doc-engine/package.json packages/doc-engine/package.json
+COPY packages/board-engine/package.json packages/board-engine/package.json
+COPY apps/api/package.json apps/api/package.json
+RUN pnpm install --no-frozen-lockfile
+
+FROM deps AS runner
+ENV NODE_ENV=production
+COPY packages/shared packages/shared
+COPY packages/db packages/db
+COPY packages/doc-engine packages/doc-engine
+COPY packages/board-engine packages/board-engine
+COPY apps/api apps/api
+WORKDIR /repo/apps/api
+EXPOSE 4000
+CMD ["pnpm", "start"]

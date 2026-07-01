@@ -1,0 +1,27 @@
+{
+  "name": "@loopeng/api",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc -p tsconfig.json --noEmit",
+    "start": "tsx src/index.ts",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@fastify/cors": "^10.0.1",
+    "@loopeng/board-engine": "workspace:*",
+    "@loopeng/db": "workspace:*",
+    "@loopeng/doc-engine": "workspace:*",
+    "@loopeng/shared": "workspace:*",
+    "drizzle-orm": "^0.36.1",
+    "fastify": "^5.1.0",
+    "fastify-plugin": "^5.0.1",
+    "tsx": "^4.19.1",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.3"
+  }
+}
