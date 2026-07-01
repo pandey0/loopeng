@@ -1,9 +1,46 @@
-import type { Board, Card, CardDependency, CardDocLink, CardState, Doc } from "@loopeng/shared";
+import type { Board, Card, CardDependency, CardState, Doc } from "@loopeng/shared";
+
+export interface CardDetailDocLink {
+  docId: string;
+  slug: string;
+  title: string;
+  docType: string;
+  linkType: string;
+}
+
+export interface CardDetailAgentRun {
+  id: string;
+  roleName: string | null;
+  status: string;
+  verdict: string | null;
+  startedAt: string | null;
+  finishedAt: string | null;
+}
+
+export interface CardDetailGateResult {
+  id: string;
+  key: string;
+  name: string;
+  status: string;
+  detail: Record<string, unknown>;
+  createdAt: string;
+}
+
+export interface CardDetailEvent {
+  id: number;
+  eventType: string;
+  actorType: string;
+  payload: Record<string, unknown>;
+  createdAt: string;
+}
 
 export interface CardDetail extends Card {
   dependsOn: CardDependency[];
   dependents: CardDependency[];
-  docLinks: CardDocLink[];
+  linkedDocs: CardDetailDocLink[];
+  agentRuns: CardDetailAgentRun[];
+  gateResults: CardDetailGateResult[];
+  events: CardDetailEvent[];
 }
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";

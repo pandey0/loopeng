@@ -125,13 +125,79 @@ export default function CardDetailPage({ params }: { params: Promise<{ cardId: s
       )}
 
       <h3>Linked docs</h3>
-      {card.docLinks.length === 0 ? (
+      {card.linkedDocs.length === 0 ? (
         <p style={{ fontSize: 12, color: "#718096" }}>No linked docs.</p>
       ) : (
         <ul>
-          {card.docLinks.map((link) => (
+          {card.linkedDocs.map((link) => (
             <li key={link.docId}>
-              {link.docId} ({link.linkType})
+              <Link href={`/docs/${link.slug}`}>{link.title}</Link> ({link.linkType})
+            </li>
+          ))}
+        </ul>
+      )}
+
+      <h3>Agent runs</h3>
+      {card.agentRuns.length === 0 ? (
+        <p style={{ fontSize: 12, color: "#718096" }}>No agent runs yet.</p>
+      ) : (
+        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12, marginBottom: 24 }}>
+          <thead>
+            <tr style={{ textAlign: "left", borderBottom: "1px solid #e2e8f0" }}>
+              <th style={{ padding: 6 }}>Role</th>
+              <th style={{ padding: 6 }}>Status</th>
+              <th style={{ padding: 6 }}>Verdict</th>
+              <th style={{ padding: 6 }}>Started</th>
+              <th style={{ padding: 6 }}>Finished</th>
+            </tr>
+          </thead>
+          <tbody>
+            {card.agentRuns.map((run) => (
+              <tr key={run.id} style={{ borderBottom: "1px solid #edf2f7" }}>
+                <td style={{ padding: 6 }}>{run.roleName ?? "—"}</td>
+                <td style={{ padding: 6 }}>{run.status}</td>
+                <td style={{ padding: 6 }}>{run.verdict ?? "—"}</td>
+                <td style={{ padding: 6 }}>{run.startedAt ? new Date(run.startedAt).toLocaleString() : "—"}</td>
+                <td style={{ padding: 6 }}>{run.finishedAt ? new Date(run.finishedAt).toLocaleString() : "—"}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+
+      <h3>Gate results</h3>
+      {card.gateResults.length === 0 ? (
+        <p style={{ fontSize: 12, color: "#718096" }}>No gate results yet.</p>
+      ) : (
+        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12, marginBottom: 24 }}>
+          <thead>
+            <tr style={{ textAlign: "left", borderBottom: "1px solid #e2e8f0" }}>
+              <th style={{ padding: 6 }}>Gate</th>
+              <th style={{ padding: 6 }}>Status</th>
+              <th style={{ padding: 6 }}>When</th>
+            </tr>
+          </thead>
+          <tbody>
+            {card.gateResults.map((gate) => (
+              <tr key={gate.id} style={{ borderBottom: "1px solid #edf2f7" }}>
+                <td style={{ padding: 6 }}>{gate.name}</td>
+                <td style={{ padding: 6 }}>{gate.status}</td>
+                <td style={{ padding: 6 }}>{new Date(gate.createdAt).toLocaleString()}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+
+      <h3>Event timeline</h3>
+      {card.events.length === 0 ? (
+        <p style={{ fontSize: 12, color: "#718096" }}>No events recorded.</p>
+      ) : (
+        <ul style={{ fontSize: 12, listStyle: "none", padding: 0 }}>
+          {card.events.map((event) => (
+            <li key={event.id} style={{ marginBottom: 4 }}>
+              <span style={{ color: "#718096" }}>{new Date(event.createdAt).toLocaleString()}</span> — {event.eventType}
+              {event.payload.to ? ` (${String(event.payload.from ?? "?")} → ${String(event.payload.to)})` : ""}
             </li>
           ))}
         </ul>

@@ -1,7 +1,17 @@
 import type { FastifyPluginAsync } from "fastify";
-import { eq } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 import { applyTransition, wouldCreateCycle } from "@loopeng/board-engine";
-import { cardDependencies, cardDocLinks, cards } from "@loopeng/db";
+import {
+  agentRoles,
+  agentRuns,
+  cardDependencies,
+  cardDocLinks,
+  cards,
+  docs,
+  eventLog,
+  gateDefinitions,
+  gateResults,
+} from "@loopeng/db";
 import {
   CardCreateInputSchema,
   CardTransitionInputSchema,
@@ -57,12 +67,62 @@ export const cardRoutes: FastifyPluginAsync = async (fastify) => {
       reply.status(404).send({ error: "not_found" });
       return;
     }
-    const [dependsOn, dependents, docLinks] = await Promise.all([
+    const [dependsOn, dependents, linkedDocs, agentRunRows, gateResultRows, events] = await Promise.all([
       fastify.db.select().from(cardDependencies).where(eq(cardDependencies.cardId, id)),
       fastify.db.select().from(cardDependencies).where(eq(cardDependencies.dependsOnCardId, id)),
-      fastify.db.select().from(cardDocLinks).where(eq(cardDocLinks.cardId, id)),
+      fastify.db
+        .select({
+          docId: docs.id,
+          slug: docs.slug,
+          title: docs.title,
+          docType: docs.docType,
+          linkType: cardDocLinks.linkType,
+        })
+        .from(cardDocLinks)
+        .innerJoin(docs, eq(cardDocLinks.docId, docs.id))
+        .where(eq(cardDocLinks.cardId, id)),
+      fastify.db
+        .select({
+          id: agentRuns.id,
+          roleName: agentRoles.name,
+          status: agentRuns.status,
+          verdict: agentRuns.verdict,
+          startedAt: agentRuns.startedAt,
+          finishedAt: agentRuns.finishedAt,
+        })
+        .from(agentRuns)
+        .leftJoin(agentRoles, eq(agentRuns.agentRoleId, agentRoles.id))
+        .where(eq(agentRuns.cardId, id))
+        .orderBy(agentRuns.startedAt),
+      fastify.db
+        .select({
+          id: gateResults.id,
+          key: gateDefinitions.key,
+          name: gateDefinitions.name,
+          status: gateResults.status,
+          detail: gateResults.detail,
+          createdAt: gateResults.createdAt,
+        })
+        .from(gateResults)
+        .innerJoin(gateDefinitions, eq(gateResults.gateDefinitionId, gateDefinitions.id))
+        .where(eq(gateResults.cardId, id))
+        .orderBy(gateResults.createdAt),
+      fastify.db
+        .select()
+        .from(eventLog)
+        .where(and(eq(eventLog.entityType, "card"), eq(eventLog.entityId, id)))
+        .orderBy(desc(eventLog.id)),
     ]);
-    return { ...card, dependsOn, dependents, docLinks };
+
+    return {
+      ...card,
+      dependsOn,
+      dependents,
+      linkedDocs,
+      agentRuns: agentRunRows,
+      gateResults: gateResultRows,
+      events,
+    };
   });
 
   fastify.post("/cards/:id/transition", async (request, reply) => {
