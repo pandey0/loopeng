@@ -8,3 +8,4 @@ dist/
 data/wiki-repo/
 data/worktrees/
 data/agent-logs/
+tmp-scripts/
