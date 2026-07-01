@@ -14,6 +14,7 @@
     "@loopeng/connectors": "workspace:*",
     "@loopeng/db": "workspace:*",
     "@loopeng/deploy-engine": "workspace:*",
+    "@loopeng/doc-engine": "workspace:*",
     "@loopeng/gates": "workspace:*",
     "@loopeng/shared": "workspace:*",
     "@loopeng/worktree-manager": "workspace:*",

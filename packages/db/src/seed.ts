@@ -72,6 +72,13 @@ async function main() {
       target: { boardId: board.id },
       action: { type: "triage_scan" },
     },
+    {
+      name: "nightly doc drift scan",
+      triggerType: "cron",
+      scheduleCron: "0 2 * * *",
+      target: { boardId: board.id },
+      action: { type: "doc_drift_scan" },
+    },
   ]);
 
   await pool.end();
