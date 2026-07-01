@@ -64,7 +64,7 @@ export const dockerComposeProvider: DeployProvider = {
     // a git-revert rollback (nothing safe for us to revert).
     const createdNewCommit = mergedSha !== preMergeSha;
 
-    const build = await execIn(ctx.repoRoot, "docker", ["compose", "-f", COMPOSE_FILE, "up", "-d", "--build", ...COMPOSE_SERVICES], 10 * 60 * 1000);
+    const build = await execIn(ctx.repoRoot, "docker", ["compose", "-f", COMPOSE_FILE, "up", "-d", "--no-deps", "--build", ...COMPOSE_SERVICES], 10 * 60 * 1000);
     if (build.code !== 0) {
       return { status: "failed", createdNewCommit, deployedCommitSha: mergedSha, detail: { step: "docker compose up", code: build.code, stderrTail: build.stderr.slice(-3000) } };
     }
@@ -94,7 +94,7 @@ export const dockerComposeProvider: DeployProvider = {
       return { status: "failed", createdNewCommit: false, detail: { step: "revert", error: (err as Error).message, toCommitSha } };
     }
 
-    const build = await execIn(ctx.repoRoot, "docker", ["compose", "-f", COMPOSE_FILE, "up", "-d", "--build", ...COMPOSE_SERVICES], 10 * 60 * 1000);
+    const build = await execIn(ctx.repoRoot, "docker", ["compose", "-f", COMPOSE_FILE, "up", "-d", "--no-deps", "--build", ...COMPOSE_SERVICES], 10 * 60 * 1000);
     if (build.code !== 0) {
       return { status: "failed", createdNewCommit: false, detail: { step: "docker compose up (rollback)", code: build.code, stderrTail: build.stderr.slice(-3000) } };
     }
