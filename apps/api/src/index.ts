@@ -7,6 +7,7 @@ import { healthRoutes } from "./routes/health.js";
 import { docRoutes } from "./routes/docs.js";
 import { boardRoutes } from "./routes/boards.js";
 import { cardRoutes } from "./routes/cards.js";
+import { eventRoutes } from "./routes/events.js";
 
 const fastify = Fastify({ logger: true });
 
@@ -18,6 +19,7 @@ await fastify.register(healthRoutes);
 await fastify.register(docRoutes);
 await fastify.register(boardRoutes);
 await fastify.register(cardRoutes);
+await fastify.register(eventRoutes);
 
 const port = Number(process.env.API_PORT ?? 4000);
 

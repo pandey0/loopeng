@@ -7,6 +7,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Column } from "@loopeng/ui";
 import type { Card, CardState } from "@loopeng/shared";
 import { api } from "../../lib/api";
+import { ActivityFeed } from "./ActivityFeed";
 
 // Phase 3 orchestrator now runs the full gate pipeline at gate_checks and
 // routes by risk_tier: high stops at awaiting_approval for a human click,
@@ -81,29 +82,32 @@ export default function BoardPage() {
         </select>
         {boardId && <Link href={`/board/${boardId}/graph`}>Dependency graph →</Link>}
       </div>
-      <div style={{ display: "flex", gap: 12, overflowX: "auto" }}>
-        {PHASE_3_COLUMNS.map(({ state, title }) => (
-          <Column
-            key={state}
-            state={state}
-            title={title}
-            cards={byState(state)}
-            onDropCard={handleDrop}
-            onCardClick={(card: Card) => router.push(`/card/${card.id}`)}
-            renderCardFooter={
-              state === "awaiting_approval"
-                ? (card) => (
-                    <button
-                      onClick={() => handleApprove(card.id)}
-                      style={{ fontSize: 11, padding: "4px 8px", marginTop: -4, marginBottom: 8, cursor: "pointer" }}
-                    >
-                      Approve → Deploy
-                    </button>
-                  )
-                : undefined
-            }
-          />
-        ))}
+      <div style={{ display: "flex", gap: 12 }}>
+        <div style={{ display: "flex", gap: 12, overflowX: "auto", flex: 1 }}>
+          {PHASE_3_COLUMNS.map(({ state, title }) => (
+            <Column
+              key={state}
+              state={state}
+              title={title}
+              cards={byState(state)}
+              onDropCard={handleDrop}
+              onCardClick={(card: Card) => router.push(`/card/${card.id}`)}
+              renderCardFooter={
+                state === "awaiting_approval"
+                  ? (card) => (
+                      <button
+                        onClick={() => handleApprove(card.id)}
+                        style={{ fontSize: 11, padding: "4px 8px", marginTop: -4, marginBottom: 8, cursor: "pointer" }}
+                      >
+                        Approve → Deploy
+                      </button>
+                    )
+                  : undefined
+              }
+            />
+          ))}
+        </div>
+        <ActivityFeed boardId={boardId} />
       </div>
     </div>
   );
