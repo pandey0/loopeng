@@ -41,6 +41,15 @@ describe("buildImplementerPrompt", () => {
     const prompt = buildImplementerPrompt(card({ acceptanceCriteria: [] }), []);
     expect(prompt).toContain("(none specified)");
   });
+
+  it("includes linked spec doc bodies", () => {
+    const prompt = buildImplementerPrompt(card(), [], undefined, [
+      { title: "Auth Spec", body: "All requests must be authenticated." },
+    ]);
+    expect(prompt).toContain("## Linked spec docs");
+    expect(prompt).toContain("### Spec: Auth Spec");
+    expect(prompt).toContain("All requests must be authenticated.");
+  });
 });
 
 describe("buildReviewerPrompt", () => {
@@ -48,5 +57,27 @@ describe("buildReviewerPrompt", () => {
     const prompt = buildReviewerPrompt(card({ acceptanceCriteria: ["handles empty state"] }), "diff --git a/x b/x");
     expect(prompt).toContain("## Acceptance criteria");
     expect(prompt).toContain("- handles empty state");
+  });
+
+  it("requires per-criterion SATISFIED/NOT SATISFIED enumeration for each acceptance criterion", () => {
+    const criteria = ["handles empty state", "shows loading spinner", "logs errors to console"];
+    const prompt = buildReviewerPrompt(card({ acceptanceCriteria: criteria }), "diff --git a/x b/x");
+
+    expect(prompt).toContain("exactly 3 CRITERION line(s)");
+    for (const c of criteria) {
+      expect(prompt).toContain(c);
+    }
+    expect(prompt).toContain("CRITERION: <the exact criterion text> -> SATISFIED");
+    expect(prompt).toContain("CRITERION: <the exact criterion text> -> NOT SATISFIED");
+    expect(prompt).toContain("If any CRITERION line is marked NOT SATISFIED, the final verdict must be VERDICT: FAIL.");
+  });
+
+  it("includes linked spec doc bodies", () => {
+    const prompt = buildReviewerPrompt(card({ acceptanceCriteria: ["handles empty state"] }), "diff --git a/x b/x", [
+      { title: "Auth Spec", body: "All requests must be authenticated." },
+    ]);
+    expect(prompt).toContain("## Linked spec docs");
+    expect(prompt).toContain("### Spec: Auth Spec");
+    expect(prompt).toContain("All requests must be authenticated.");
   });
 });
