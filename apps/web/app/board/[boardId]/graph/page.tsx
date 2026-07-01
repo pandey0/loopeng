@@ -1,15 +1,13 @@
 "use client";
 
-import { use, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import ReactFlow, { Background, Controls, type Edge, type Node } from "reactflow";
 import "reactflow/dist/style.css";
 import { api } from "../../../../lib/api";
 
-// Next.js 15 passes route params as a Promise even to client components —
-// React's use() hook unwraps it without needing an async wrapper component.
-export default function DependencyGraphPage({ params }: { params: Promise<{ boardId: string }> }) {
-  const { boardId } = use(params);
+export default function DependencyGraphPage({ params }: { params: { boardId: string } }) {
+  const { boardId } = params;
   const cardsQuery = useQuery({ queryKey: ["cards", boardId], queryFn: () => api.listCards(boardId) });
   const [edges, setEdges] = useState<Edge[]>([]);
 
