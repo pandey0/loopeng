@@ -2,6 +2,7 @@ import { and, desc, eq, gt } from "drizzle-orm";
 import { db } from "@loopeng/db";
 import { automations, eventLog } from "@loopeng/db";
 import { runDeployPipeline } from "@loopeng/deploy-engine";
+import { isReady } from "@loopeng/board-engine";
 import type { CoordinationStrategy } from "../coordination/types.js";
 
 const POLL_INTERVAL_MS = Number(process.env.ORCHESTRATOR_EVENT_POLL_MS ?? 5000);
@@ -33,6 +34,10 @@ export function startEventTrigger(coordination: CoordinationStrategy): () => voi
         if (!matches) continue;
 
         if (payload.to === "ready") {
+          // Mirrors cron-trigger's triage scan: a card dragged to "ready"
+          // still has to clear its "blocks" dependencies before dispatch,
+          // same as the scheduled path — event-driven isn't a bypass.
+          if (!(await isReady(row.entityId))) continue;
           await coordination
             .dispatch(row.entityId)
             .catch((err) => console.error("[orchestrator:event-trigger] dispatch failed", err));
