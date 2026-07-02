@@ -1,6 +1,5 @@
 import { z } from "zod";
 import { cardDependencies, cardDocLinks, cards, db } from "@loopeng/db";
-import { applyTransition } from "@loopeng/board-engine";
 import { createDoc } from "@loopeng/doc-engine";
 import { PLANNER_CHILD_CARD_TYPES, RISK_TIERS, type RiskTier } from "@loopeng/shared";
 
@@ -149,12 +148,11 @@ export interface PersistedDecomposition {
 
 // Writes a validated planner decomposition to the board: one spec doc (the
 // markdown block, committed through doc-engine so it gets the same
-// git-backed history as a human-authored doc), one epic card that never
-// leaves "backlog" (it isn't implementable — agents pick up leaf cards), and
-// one card per decomposition entry, each spec-linked to the doc, related to
-// the epic, blocked on its declared dependsOn keys, and transitioned straight
-// to "ready" so the existing triage/dispatch loop picks it up without a human
-// touching the board.
+// git-backed history as a human-authored doc), one epic card, and one card
+// per decomposition entry, each spec-linked to the doc, related to the epic,
+// and blocked on its declared dependsOn keys. Every card lands (and stays)
+// in "backlog" — this is an intake tool, not an auto-approval bypass, so a
+// human reviews and moves cards to "ready" themselves before dispatch.
 export async function persistDecomposition(
   boardId: string,
   parsed: ParsedPlannerOutput,
@@ -222,12 +220,7 @@ export async function persistDecomposition(
     }
   }
 
-  const cardIds: string[] = [];
-  for (const spec of decomposition.cards) {
-    const cardId = idByKey.get(spec.key)!;
-    await applyTransition({ cardId, toState: "ready", actorType: "agent" });
-    cardIds.push(cardId);
-  }
+  const cardIds = decomposition.cards.map((spec) => idByKey.get(spec.key)!);
 
   return { epicCardId: epicCard.id, cardIds, specDocId: specDoc.id };
 }

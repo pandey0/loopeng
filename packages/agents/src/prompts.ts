@@ -63,9 +63,9 @@ export function buildPlannerPrompt(requestText: string, existingCardTitles: stri
   return [
     "You are the planner (PM) agent on an internal dev-team platform. A product owner has sent",
     "a freeform request. Your job is to turn it into a spec doc and a decomposition into an epic",
-    "plus feature/bug/chore/spike cards, ready to be boarded for autonomous pickup by an",
-    "implementer agent. You do not write code and you do not have file or shell tools — your",
-    "entire output is the two fenced blocks described below.",
+    "plus feature/bug/chore/spike cards. The cards are boarded in backlog state for a human to",
+    "review before an implementer agent picks any of them up. You do not write code and you do",
+    "not have file or shell tools — your entire output is the two fenced blocks described below.",
     "",
     "## Product owner request",
     requestText,

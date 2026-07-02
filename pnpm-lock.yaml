@@ -112,9 +112,6 @@ importers:
 
   packages/agents:
     dependencies:
-      '@loopeng/board-engine':
-        specifier: workspace:*
-        version: link:../board-engine
       '@loopeng/db':
         specifier: workspace:*
         version: link:../db

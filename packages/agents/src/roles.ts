@@ -106,8 +106,9 @@ export interface PlannerRunResult extends AgentRunResult, PersistedDecomposition
 // it runs read-only against the main repo checkout (for codebase context)
 // and is never allowed to touch files; its entire output is the two fenced
 // blocks parsePlannerOutput expects. On success, the decomposition is
-// persisted and every child card is transitioned straight to "ready" so the
-// existing dispatch loop picks it up without a human touching the board.
+// persisted with every card left in "backlog" — this is an intake tool, not
+// an auto-approval bypass, so a human reviews and moves cards to "ready"
+// themselves before dispatch.
 export async function runPlannerAgent(boardId: string, requestText: string): Promise<PlannerRunResult> {
   const roleId = await getRoleId("planner");
   const existingCards = await db.select({ title: cards.title }).from(cards).where(eq(cards.boardId, boardId));

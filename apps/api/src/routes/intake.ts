@@ -7,8 +7,9 @@ import { IntakeInputSchema } from "@loopeng/shared";
 // Replaces a human manually writing a spec doc + cards: a product owner
 // posts a freeform request, the planner agent drafts a spec doc and a
 // dependency-linked epic/feature/bug decomposition, and every leaf card
-// lands on the board already in "ready" state for the autonomous loop to
-// pick up. Synchronous by design (mirrors POST /cards/:id/dispatch) — the
+// lands on the board in "backlog" state for a human to review before
+// moving it to "ready" — this is an intake tool, not an auto-approval
+// bypass. Synchronous by design (mirrors POST /cards/:id/dispatch) — the
 // planner is a single bounded CLI call, not a multi-attempt worktree run.
 export const intakeRoutes: FastifyPluginAsync = async (fastify) => {
   fastify.post("/boards/:id/intake", async (request, reply) => {

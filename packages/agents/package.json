@@ -10,7 +10,6 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@loopeng/board-engine": "workspace:*",
     "@loopeng/db": "workspace:*",
     "@loopeng/doc-engine": "workspace:*",
     "@loopeng/shared": "workspace:*",
