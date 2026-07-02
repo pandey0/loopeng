@@ -1,6 +1,7 @@
 import type { Card } from "@loopeng/shared";
 import { cn } from "./lib/utils";
 import { Badge } from "./components/badge";
+import { getStatusMeta } from "./lib/status";
 
 const RISK_BORDER_CLASS: Record<Card["riskTier"], string> = {
   low: "border-l-success",
@@ -22,6 +23,7 @@ export interface CardTileProps {
 }
 
 export function CardTile({ card, draggable = true, onDragStart, onClick }: CardTileProps) {
+  const status = getStatusMeta(card.state);
   return (
     <div
       draggable={draggable}
@@ -35,6 +37,9 @@ export function CardTile({ card, draggable = true, onDragStart, onClick }: CardT
     >
       <div className="text-sm font-semibold">{card.title}</div>
       <div className="mt-1 flex items-center gap-2 text-xs text-muted-foreground">
+        <span title={status.label}>
+          <status.Icon className={cn("h-3 w-3 shrink-0", status.textClassName)} />
+        </span>
         <span>{card.cardType}</span>
         <span>P{card.priority}</span>
         <Badge variant={RISK_BADGE_VARIANT[card.riskTier]} className="px-1.5 py-0 text-[10px]">

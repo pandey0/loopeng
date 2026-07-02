@@ -1,51 +1,20 @@
 "use client";
 
-import { useEffect, useState } from "react";
 import Link from "next/link";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { api, type ActivityEvent } from "../../lib/api";
+import { useNotifications } from "../providers/NotificationProvider";
+import { describeEvent } from "../../lib/events";
 
-function describeEvent(event: ActivityEvent): string {
-  if (event.eventType === "card.moved") {
-    const { from, to } = event.payload as { from?: string; to?: string };
-    return `moved ${from ?? "?"} → ${to ?? "?"}`;
-  }
-  if (event.eventType === "card.awaiting_deploy") return "awaiting deploy";
-  if (event.eventType === "doc.drift_detected") return "doc drift detected";
-  return event.eventType;
-}
-
+// Reads from the single app-wide NotificationProvider (mounted once in
+// layout.tsx) instead of opening its own EventSource — see the acceptance
+// criteria: only one SSE connection to /events/stream at a time, however
+// many components want live events.
 export function ActivityFeed({ boardId }: { boardId: string | null }) {
-  const queryClient = useQueryClient();
-  const [events, setEvents] = useState<ActivityEvent[]>([]);
-
-  const eventsQuery = useQuery({
-    queryKey: ["events", boardId],
-    queryFn: () => api.listEvents({ boardId: boardId ?? undefined, limit: 50 }),
-    enabled: !!boardId,
-  });
-
-  useEffect(() => {
-    setEvents(eventsQuery.data ?? []);
-  }, [eventsQuery.data]);
-
-  useEffect(() => {
-    if (!boardId) return;
-    const source = new EventSource(api.eventsStreamUrl(boardId));
-    source.addEventListener("activity", (raw) => {
-      const event = JSON.parse((raw as MessageEvent<string>).data) as ActivityEvent;
-      setEvents((prev) => (prev.some((existing) => existing.id === event.id) ? prev : [event, ...prev].slice(0, 50)));
-      if (event.eventType.startsWith("card.")) {
-        queryClient.invalidateQueries({ queryKey: ["cards", boardId] });
-      }
-    });
-    return () => source.close();
-  }, [boardId, queryClient]);
+  const { events } = useNotifications();
 
   return (
     <div className="min-w-[260px] flex-[0_0_280px] rounded-lg bg-muted p-2.5">
       <div className="mb-2 text-xs font-bold uppercase text-muted-foreground">Activity</div>
-      {events.length === 0 ? (
+      {!boardId || events.length === 0 ? (
         <p className="text-xs text-muted-foreground">No activity yet.</p>
       ) : (
         <ul className="m-0 list-none p-0 text-xs">
