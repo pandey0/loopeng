@@ -3,7 +3,7 @@
 import { use, useEffect, useState } from "react";
 import Link from "next/link";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Badge, Button, Input, Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "@loopeng/ui";
+import { Badge, Button, Input, StatusBadge, Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "@loopeng/ui";
 import { api } from "../../../lib/api";
 
 export default function CardDetailPage({ params }: { params: Promise<{ cardId: string }> }) {
@@ -55,11 +55,11 @@ export default function CardDetailPage({ params }: { params: Promise<{ cardId: s
         ← Back to board
       </Link>
       <h1 className="mt-2 text-2xl font-bold">{card.title}</h1>
-      <div className="mb-4 flex gap-3 text-xs text-muted-foreground">
+      <div className="mb-4 flex items-center gap-3 text-xs text-muted-foreground">
         <span>{card.cardType}</span>
         <span>risk: {card.riskTier}</span>
         <span>priority: P{card.priority}</span>
-        <span>state: {card.state}</span>
+        <StatusBadge status={card.state} />
       </div>
 
       {card.description && <p className="mb-4">{card.description}</p>}
@@ -190,7 +190,9 @@ export default function CardDetailPage({ params }: { params: Promise<{ cardId: s
             {card.gateResults.map((gate) => (
               <TableRow key={gate.id}>
                 <TableCell>{gate.name}</TableCell>
-                <TableCell>{gate.status}</TableCell>
+                <TableCell>
+                  <StatusBadge status={gate.status as import("@loopeng/shared").GateResultStatus} />
+                </TableCell>
                 <TableCell>{new Date(gate.createdAt).toLocaleString()}</TableCell>
               </TableRow>
             ))}

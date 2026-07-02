@@ -1,12 +1,13 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Column, Button } from "@loopeng/ui";
 import type { Card, CardState } from "@loopeng/shared";
 import { api } from "../../lib/api";
+import { useBoard } from "../providers/BoardProvider";
 import { ActivityFeed } from "./ActivityFeed";
 
 // Phase 3 orchestrator now runs the full gate pipeline at gate_checks and
@@ -28,16 +29,8 @@ const PHASE_3_COLUMNS: { state: CardState; title: string }[] = [
 export default function BoardPage() {
   const router = useRouter();
   const queryClient = useQueryClient();
-  const [boardId, setBoardId] = useState<string | null>(null);
+  const { boardId, boards, boardsLoading } = useBoard();
   const [draggingCard, setDraggingCard] = useState<Card | null>(null);
-
-  const boardsQuery = useQuery({ queryKey: ["boards"], queryFn: api.listBoards });
-
-  useEffect(() => {
-    if (!boardId && boardsQuery.data && boardsQuery.data.length > 0) {
-      setBoardId(boardsQuery.data[0]!.id);
-    }
-  }, [boardId, boardsQuery.data]);
 
   const cardsQuery = useQuery({
     queryKey: ["cards", boardId],
@@ -45,8 +38,8 @@ export default function BoardPage() {
     enabled: !!boardId,
   });
 
-  if (boardsQuery.isLoading) return <p>Loading boards...</p>;
-  if (!boardsQuery.data || boardsQuery.data.length === 0) {
+  if (boardsLoading) return <p>Loading boards...</p>;
+  if (boards.length === 0) {
     return <p>No boards yet. Seed the database first (pnpm db:seed).</p>;
   }
 
@@ -73,24 +66,13 @@ export default function BoardPage() {
 
   return (
     <div>
-      <div className="mb-4 flex items-center justify-between">
-        <select
-          value={boardId ?? ""}
-          onChange={(e) => setBoardId(e.target.value)}
-          className="h-9 rounded-md border border-input bg-background px-3 text-sm shadow-sm"
-        >
-          {boardsQuery.data.map((b) => (
-            <option key={b.id} value={b.id}>
-              {b.name}
-            </option>
-          ))}
-        </select>
-        {boardId && (
+      {boardId && (
+        <div className="mb-4 flex items-center justify-end">
           <Link href={`/board/${boardId}/graph`} className="text-sm text-primary hover:underline">
             Dependency graph →
           </Link>
-        )}
-      </div>
+        </div>
+      )}
       <div className="flex gap-3">
         <div className="flex flex-1 gap-3 overflow-x-auto">
           {PHASE_3_COLUMNS.map(({ state, title }) => (

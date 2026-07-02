@@ -1,8 +1,11 @@
+"use client";
+
 import { useState } from "react";
 import type { ReactNode } from "react";
 import type { Card, CardState } from "@loopeng/shared";
 import { canTransition } from "@loopeng/shared";
 import { CardTile } from "./CardTile";
+import { StatusDot } from "./components/status-badge";
 
 export interface ColumnProps {
   state: CardState;
@@ -53,7 +56,8 @@ export function Column({
         draggingCardState && !isValidTarget ? "border-dashed border-muted-foreground/40 opacity-60" : "border-transparent opacity-100",
       ].join(" ")}
     >
-      <div className="mb-2 text-xs font-bold uppercase text-muted-foreground">
+      <div className="mb-2 flex items-center gap-1.5 text-xs font-bold uppercase text-muted-foreground">
+        <StatusDot status={state} />
         {title} <span className="text-muted-foreground/70">({cards.length})</span>
       </div>
       {cards.map((card) => (

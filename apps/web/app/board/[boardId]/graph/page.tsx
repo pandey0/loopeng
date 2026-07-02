@@ -5,13 +5,21 @@ import { useQuery } from "@tanstack/react-query";
 import ReactFlow, { Background, Controls, type Edge, type Node } from "reactflow";
 import "reactflow/dist/style.css";
 import { api } from "../../../../lib/api";
+import { useBoard } from "../../../providers/BoardProvider";
 
 // Next.js 15 passes route params as a Promise even to client components —
 // React's use() hook unwraps it without needing an async wrapper component.
 export default function DependencyGraphPage({ params }: { params: Promise<{ boardId: string }> }) {
   const { boardId } = use(params);
+  const { boardId: currentBoardId, setBoardId } = useBoard();
   const cardsQuery = useQuery({ queryKey: ["cards", boardId], queryFn: () => api.listCards(boardId) });
   const [edges, setEdges] = useState<Edge[]>([]);
+
+  // Keep the top bar's board switcher in sync with whichever board's graph
+  // is currently open, so it reflects this page even if reached by URL.
+  useEffect(() => {
+    if (currentBoardId !== boardId) setBoardId(boardId);
+  }, [boardId, currentBoardId, setBoardId]);
 
   useEffect(() => {
     if (!cardsQuery.data) return;
