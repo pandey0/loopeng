@@ -26,7 +26,8 @@ export interface CardTileProps {
 
 export function CardTile({ card, draggable = true, highlighted = false, onDragStart, onClick }: CardTileProps) {
   const status = getStatusMeta(card.state);
-  const isActive = card.activeAgentRun !== null;
+  const activeAgentRun = card.activeAgentRun ?? null;
+  const isActive = activeAgentRun !== null;
   return (
     <div
       draggable={draggable}
@@ -68,7 +69,7 @@ export function CardTile({ card, draggable = true, highlighted = false, onDragSt
             <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-primary opacity-75" />
             <span className="relative inline-flex h-2 w-2 rounded-full bg-primary" />
           </span>
-          {card.activeAgentRun!.roleName ?? "agent"} {card.activeAgentRun!.status}
+          {activeAgentRun?.roleName ?? "agent"} {activeAgentRun?.status}
         </div>
       )}
     </div>
