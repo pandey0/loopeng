@@ -1,4 +1,4 @@
-import type { Board, Card, CardDependency, CardState, Doc } from "@loopeng/shared";
+import type { Board, Card, CardDependency, CardState, CardWithStatus, Doc } from "@loopeng/shared";
 
 export interface CardDetailDocLink {
   docId: string;
@@ -45,6 +45,13 @@ export interface ActivityEvent {
   createdAt: string;
 }
 
+export interface IntakeResult {
+  agentRunId: string;
+  epicCardId: string;
+  cardIds: string[];
+  specDocId: string;
+}
+
 export interface CardDetail extends Card {
   dependsOn: CardDependency[];
   dependents: CardDependency[];
@@ -56,14 +63,39 @@ export interface CardDetail extends Card {
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
 
+// Carries the parsed JSON error body (when the API sent one) alongside the
+// generic message, so callers that want to show the server's actual
+// validation/error message (e.g. the intake modal) don't have to re-parse it.
+export class ApiError extends Error {
+  status: number;
+  body: unknown;
+
+  constructor(message: string, status: number, body: unknown) {
+    super(message);
+    this.name = "ApiError";
+    this.status = status;
+    this.body = body;
+  }
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${API_URL}${path}`, {
     ...init,
     headers: { "Content-Type": "application/json", ...init?.headers },
   });
   if (!res.ok) {
-    const body = await res.text();
-    throw new Error(`${init?.method ?? "GET"} ${path} failed: ${res.status} ${body}`);
+    const text = await res.text();
+    let body: unknown = text;
+    try {
+      body = JSON.parse(text);
+    } catch {
+      // not JSON, keep the raw text
+    }
+    const message =
+      body && typeof body === "object" && "message" in body && typeof (body as { message: unknown }).message === "string"
+        ? (body as { message: string }).message
+        : `${init?.method ?? "GET"} ${path} failed: ${res.status} ${text}`;
+    throw new ApiError(message, res.status, body);
   }
   if (res.status === 204) return undefined as T;
   return res.json() as Promise<T>;
@@ -74,9 +106,11 @@ export const api = {
   getBoard: (id: string) => request<Board & { cards: Card[] }>(`/boards/${id}`),
   createBoard: (input: { name: string; description?: string }) =>
     request<Board>("/boards", { method: "POST", body: JSON.stringify(input) }),
+  intake: (boardId: string, requestText: string) =>
+    request<IntakeResult>(`/boards/${boardId}/intake`, { method: "POST", body: JSON.stringify({ requestText }) }),
 
   listCards: (boardId?: string) =>
-    request<Card[]>(`/cards${boardId ? `?boardId=${boardId}` : ""}`),
+    request<CardWithStatus[]>(`/cards${boardId ? `?boardId=${boardId}` : ""}`),
   createCard: (input: {
     boardId: string;
     title: string;

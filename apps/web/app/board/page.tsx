@@ -1,14 +1,16 @@
 "use client";
 
-import { useState } from "react";
+import { Suspense, useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Column, Button } from "@loopeng/ui";
-import type { Card, CardState } from "@loopeng/shared";
+import type { CardState, CardWithStatus } from "@loopeng/shared";
 import { api } from "../../lib/api";
 import { useBoard } from "../providers/BoardProvider";
 import { ActivityFeed } from "./ActivityFeed";
+
+const HIGHLIGHT_DURATION_MS = 4000;
 
 // Phase 3 orchestrator now runs the full gate pipeline at gate_checks and
 // routes by risk_tier: high stops at awaiting_approval for a human click,
@@ -27,16 +29,46 @@ const PHASE_3_COLUMNS: { state: CardState; title: string }[] = [
 ];
 
 export default function BoardPage() {
+  return (
+    <Suspense fallback={<p>Loading board...</p>}>
+      <BoardPageInner />
+    </Suspense>
+  );
+}
+
+function BoardPageInner() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const queryClient = useQueryClient();
   const { boardId, boards, boardsLoading } = useBoard();
-  const [draggingCard, setDraggingCard] = useState<Card | null>(null);
+  const [draggingCard, setDraggingCard] = useState<CardWithStatus | null>(null);
+  const [highlightIds, setHighlightIds] = useState<Set<string>>(new Set());
+  const cardEls = useRef<Map<string, HTMLDivElement>>(new Map());
 
   const cardsQuery = useQuery({
     queryKey: ["cards", boardId],
     queryFn: () => api.listCards(boardId!),
     enabled: !!boardId,
   });
+
+  // Lands here from the intake modal's "View on board" action
+  // (?highlight=id1,id2,...) — pulses the new cards and scrolls the first
+  // one into view, then strips the param so it doesn't persist on refresh.
+  useEffect(() => {
+    const raw = searchParams.get("highlight");
+    if (!raw) return;
+    const ids = new Set(raw.split(","));
+    setHighlightIds(ids);
+    router.replace("/board", { scroll: false });
+
+    const firstId = raw.split(",")[0];
+    const el = firstId ? cardEls.current.get(firstId) : undefined;
+    el?.scrollIntoView({ behavior: "smooth", block: "center" });
+
+    const timer = setTimeout(() => setHighlightIds(new Set()), HIGHLIGHT_DURATION_MS);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams]);
 
   if (boardsLoading) return <p>Loading boards...</p>;
   if (boards.length === 0) {
@@ -64,6 +96,15 @@ export default function BoardPage() {
     }
   }
 
+  async function handleRetry(cardId: string) {
+    try {
+      await api.transitionCard(cardId, "ready");
+      queryClient.invalidateQueries({ queryKey: ["cards", boardId] });
+    } catch (err) {
+      alert((err as Error).message);
+    }
+  }
+
   return (
     <div>
       {boardId && (
@@ -82,10 +123,15 @@ export default function BoardPage() {
               title={title}
               cards={byState(state)}
               onDropCard={handleDrop}
-              onCardClick={(card: Card) => router.push(`/card/${card.id}`)}
+              onCardClick={(card) => router.push(`/card/${card.id}`)}
               draggingCardState={draggingCard?.state}
               onCardDragStart={setDraggingCard}
               onCardDragEnd={() => setDraggingCard(null)}
+              highlightedCardIds={highlightIds}
+              cardRef={(cardId, el) => {
+                if (el) cardEls.current.set(cardId, el);
+                else cardEls.current.delete(cardId);
+              }}
               renderCardFooter={
                 state === "awaiting_approval"
                   ? (card) => (
@@ -93,7 +139,18 @@ export default function BoardPage() {
                         Approve → Deploy
                       </Button>
                     )
-                  : undefined
+                  : state === "blocked"
+                    ? (card) => (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => handleRetry(card.id)}
+                          className="-mt-1 mb-2 h-auto px-2 py-1 text-[11px]"
+                        >
+                          Retry
+                        </Button>
+                      )
+                    : undefined
               }
             />
           ))}

@@ -1,4 +1,4 @@
-import type { Card } from "@loopeng/shared";
+import type { Card, CardWithStatus } from "@loopeng/shared";
 import { cn } from "./lib/utils";
 import { Badge } from "./components/badge";
 import { getStatusMeta } from "./lib/status";
@@ -16,23 +16,28 @@ const RISK_BADGE_VARIANT: Record<Card["riskTier"], "success" | "warning" | "dest
 };
 
 export interface CardTileProps {
-  card: Card;
+  card: CardWithStatus;
   draggable?: boolean;
-  onDragStart?: (card: Card) => void;
-  onClick?: (card: Card) => void;
+  /** Briefly flags a just-created card (e.g. from intake) so it's easy to spot on the board. */
+  highlighted?: boolean;
+  onDragStart?: (card: CardWithStatus) => void;
+  onClick?: (card: CardWithStatus) => void;
 }
 
-export function CardTile({ card, draggable = true, onDragStart, onClick }: CardTileProps) {
+export function CardTile({ card, draggable = true, highlighted = false, onDragStart, onClick }: CardTileProps) {
   const status = getStatusMeta(card.state);
+  const isActive = card.activeAgentRun !== null;
   return (
     <div
       draggable={draggable}
       onDragStart={() => onDragStart?.(card)}
       onClick={() => onClick?.(card)}
       className={cn(
-        "mb-2 rounded-md border border-l-4 bg-card p-2.5 shadow-sm",
+        "mb-2 rounded-md border border-l-4 bg-card p-2.5 shadow-sm transition-shadow",
         RISK_BORDER_CLASS[card.riskTier],
         draggable ? "cursor-grab" : "cursor-pointer",
+        isActive && "ring-1 ring-primary/50",
+        highlighted && "ring-2 ring-primary animate-pulse",
       )}
     >
       <div className="text-sm font-semibold">{card.title}</div>
@@ -51,6 +56,21 @@ export function CardTile({ card, draggable = true, onDragStart, onClick }: CardT
           </span>
         )}
       </div>
+      {card.blockedReason && (
+        <div className="mt-1.5 flex items-center gap-1 text-[11px] font-medium text-destructive">
+          <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-destructive" />
+          Blocked: {card.blockedReason}
+        </div>
+      )}
+      {isActive && (
+        <div className="mt-1.5 flex items-center gap-1.5 text-[11px] font-medium text-primary">
+          <span className="relative flex h-2 w-2 shrink-0">
+            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-primary opacity-75" />
+            <span className="relative inline-flex h-2 w-2 rounded-full bg-primary" />
+          </span>
+          {card.activeAgentRun!.roleName ?? "agent"} {card.activeAgentRun!.status}
+        </div>
+      )}
     </div>
   );
 }

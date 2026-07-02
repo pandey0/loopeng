@@ -134,6 +134,23 @@ export const CardUpdateInputSchema = z
   });
 export type CardUpdateInput = z.infer<typeof CardUpdateInputSchema>;
 
+// Computed (not persisted) status explainability attached to a card by the
+// board-engine package when listing cards for the UI — see
+// packages/board-engine/src/card-status.ts. Plain interfaces (no zod) since
+// nothing ever needs to parse/validate these off the wire independently of
+// the Card they're attached to.
+export interface CardActiveRun {
+  roleName: string | null;
+  status: "running" | "verifying";
+}
+
+export interface CardWithStatus extends Card {
+  /** One-line reason a blocked card is blocked, e.g. "security_scan failed". Null if not blocked. */
+  blockedReason: string | null;
+  /** Set when an agent is actively working the card, so the tile can show a live indicator. */
+  activeAgentRun: CardActiveRun | null;
+}
+
 export const IntakeInputSchema = z.object({
   boardId: uuid,
   requestText: z.string().min(1),

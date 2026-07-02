@@ -1,10 +1,29 @@
 "use client";
 
-import { use, useEffect, useState } from "react";
+import { use, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Badge, Button, Input, StatusBadge, Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "@loopeng/ui";
+import {
+  Badge,
+  Button,
+  Input,
+  StatusBadge,
+  Table,
+  TableHeader,
+  TableBody,
+  TableRow,
+  TableHead,
+  TableCell,
+  Tabs,
+} from "@loopeng/ui";
 import { api } from "../../../lib/api";
+
+interface TimelineRow {
+  at: Date;
+  kind: "agent_run" | "gate_result" | "event";
+  label: string;
+  detail: string;
+}
 
 export default function CardDetailPage({ params }: { params: Promise<{ cardId: string }> }) {
   const { cardId } = use(params);
@@ -17,6 +36,42 @@ export default function CardDetailPage({ params }: { params: Promise<{ cardId: s
 
   useEffect(() => {
     if (detailQuery.data) setCriteria(detailQuery.data.acceptanceCriteria);
+  }, [detailQuery.data]);
+
+  const timeline = useMemo<TimelineRow[]>(() => {
+    if (!detailQuery.data) return [];
+    const card = detailQuery.data;
+    const rows: TimelineRow[] = [];
+
+    for (const run of card.agentRuns) {
+      const at = run.startedAt ?? run.finishedAt;
+      if (!at) continue;
+      rows.push({
+        at: new Date(at),
+        kind: "agent_run",
+        label: run.roleName ?? "agent run",
+        detail: `${run.status}${run.verdict ? ` — verdict: ${run.verdict}` : ""}`,
+      });
+    }
+    for (const gate of card.gateResults) {
+      rows.push({
+        at: new Date(gate.createdAt),
+        kind: "gate_result",
+        label: gate.name,
+        detail: gate.status,
+      });
+    }
+    for (const event of card.events) {
+      const { from, to } = event.payload as { from?: string; to?: string };
+      rows.push({
+        at: new Date(event.createdAt),
+        kind: "event",
+        label: event.eventType,
+        detail: to ? `${String(from ?? "?")} → ${String(to)}` : "",
+      });
+    }
+
+    return rows.sort((a, b) => b.at.getTime() - a.at.getTime());
   }, [detailQuery.data]);
 
   if (detailQuery.isLoading) return <p>Loading...</p>;
@@ -49,19 +104,8 @@ export default function CardDetailPage({ params }: { params: Promise<{ cardId: s
     saveCriteria(criteria.filter((_, i) => i !== index));
   }
 
-  return (
-    <div className="max-w-[720px]">
-      <Link href="/board" className="text-sm text-primary hover:underline">
-        ← Back to board
-      </Link>
-      <h1 className="mt-2 text-2xl font-bold">{card.title}</h1>
-      <div className="mb-4 flex items-center gap-3 text-xs text-muted-foreground">
-        <span>{card.cardType}</span>
-        <span>risk: {card.riskTier}</span>
-        <span>priority: P{card.priority}</span>
-        <StatusBadge status={card.state} />
-      </div>
-
+  const overview = (
+    <div>
       {card.description && <p className="mb-4">{card.description}</p>}
 
       {card.tags.length > 0 && (
@@ -145,6 +189,30 @@ export default function CardDetailPage({ params }: { params: Promise<{ cardId: s
           ))}
         </ul>
       )}
+    </div>
+  );
+
+  const activity = (
+    <div>
+      <h3 className="mb-2 text-lg font-semibold">Timeline</h3>
+      {timeline.length === 0 ? (
+        <p className="mb-6 text-xs text-muted-foreground">No activity recorded yet.</p>
+      ) : (
+        <ul className="mb-6 list-none p-0 text-xs">
+          {timeline.map((row, index) => (
+            <li key={index} className="mb-1.5 flex items-start gap-2">
+              <span className="w-36 shrink-0 text-muted-foreground">{row.at.toLocaleString()}</span>
+              <Badge variant="outline" className="shrink-0 text-[10px]">
+                {row.kind === "agent_run" ? "agent" : row.kind === "gate_result" ? "gate" : "event"}
+              </Badge>
+              <span>
+                <span className="font-medium">{row.label}</span>
+                {row.detail && <> — {row.detail}</>}
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
 
       <h3 className="mb-2 text-lg font-semibold">Agent runs</h3>
       {card.agentRuns.length === 0 ? (
@@ -178,7 +246,7 @@ export default function CardDetailPage({ params }: { params: Promise<{ cardId: s
       {card.gateResults.length === 0 ? (
         <p className="text-xs text-muted-foreground">No gate results yet.</p>
       ) : (
-        <Table className="mb-6 text-xs">
+        <Table className="text-xs">
           <TableHeader>
             <TableRow>
               <TableHead>Gate</TableHead>
@@ -199,20 +267,28 @@ export default function CardDetailPage({ params }: { params: Promise<{ cardId: s
           </TableBody>
         </Table>
       )}
+    </div>
+  );
 
-      <h3 className="mb-2 text-lg font-semibold">Event timeline</h3>
-      {card.events.length === 0 ? (
-        <p className="text-xs text-muted-foreground">No events recorded.</p>
-      ) : (
-        <ul className="list-none p-0 text-xs">
-          {card.events.map((event) => (
-            <li key={event.id} className="mb-1">
-              <span className="text-muted-foreground">{new Date(event.createdAt).toLocaleString()}</span> — {event.eventType}
-              {event.payload.to ? ` (${String(event.payload.from ?? "?")} → ${String(event.payload.to)})` : ""}
-            </li>
-          ))}
-        </ul>
-      )}
+  return (
+    <div className="max-w-[720px]">
+      <Link href="/board" className="text-sm text-primary hover:underline">
+        ← Back to board
+      </Link>
+      <h1 className="mt-2 text-2xl font-bold">{card.title}</h1>
+      <div className="mb-4 flex items-center gap-3 text-xs text-muted-foreground">
+        <span>{card.cardType}</span>
+        <span>risk: {card.riskTier}</span>
+        <span>priority: P{card.priority}</span>
+        <StatusBadge status={card.state} />
+      </div>
+
+      <Tabs
+        items={[
+          { value: "overview", label: "Overview", content: overview },
+          { value: "activity", label: "Activity", content: activity },
+        ]}
+      />
     </div>
   );
 }

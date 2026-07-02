@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import type { ReactNode } from "react";
-import type { Card, CardState } from "@loopeng/shared";
+import type { CardState, CardWithStatus } from "@loopeng/shared";
 import { canTransition } from "@loopeng/shared";
 import { CardTile } from "./CardTile";
 import { StatusDot } from "./components/status-badge";
@@ -10,13 +10,17 @@ import { StatusDot } from "./components/status-badge";
 export interface ColumnProps {
   state: CardState;
   title: string;
-  cards: Card[];
+  cards: CardWithStatus[];
   onDropCard?: (cardId: string, toState: CardState) => void;
-  onCardClick?: (card: Card) => void;
-  renderCardFooter?: (card: Card) => ReactNode;
+  onCardClick?: (card: CardWithStatus) => void;
+  renderCardFooter?: (card: CardWithStatus) => ReactNode;
   draggingCardState?: CardState | null;
-  onCardDragStart?: (card: Card) => void;
+  onCardDragStart?: (card: CardWithStatus) => void;
   onCardDragEnd?: () => void;
+  /** Card ids to visually flag as just-created (e.g. from intake), briefly pulsing. */
+  highlightedCardIds?: ReadonlySet<string>;
+  /** Lets callers keep a DOM ref per card (e.g. to scrollIntoView a highlighted card). */
+  cardRef?: (cardId: string, el: HTMLDivElement | null) => void;
   children?: ReactNode;
 }
 
@@ -30,6 +34,8 @@ export function Column({
   draggingCardState,
   onCardDragStart,
   onCardDragEnd,
+  highlightedCardIds,
+  cardRef,
 }: ColumnProps) {
   const [isDragOver, setIsDragOver] = useState(false);
   const isValidTarget = draggingCardState ? canTransition(draggingCardState, state) : true;
@@ -63,6 +69,7 @@ export function Column({
       {cards.map((card) => (
         <div
           key={card.id}
+          ref={cardRef ? (el) => cardRef(card.id, el) : undefined}
           draggable
           onDragStart={(e) => {
             e.dataTransfer.setData("text/card-id", card.id);
@@ -70,7 +77,7 @@ export function Column({
           }}
           onDragEnd={() => onCardDragEnd?.()}
         >
-          <CardTile card={card} onClick={onCardClick} draggable={false} />
+          <CardTile card={card} onClick={onCardClick} draggable={false} highlighted={highlightedCardIds?.has(card.id)} />
           {renderCardFooter?.(card)}
         </div>
       ))}
