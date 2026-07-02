@@ -29,6 +29,7 @@ export default function BoardPage() {
   const router = useRouter();
   const queryClient = useQueryClient();
   const [boardId, setBoardId] = useState<string | null>(null);
+  const [draggingCard, setDraggingCard] = useState<Card | null>(null);
 
   const boardsQuery = useQuery({ queryKey: ["boards"], queryFn: api.listBoards });
 
@@ -92,6 +93,9 @@ export default function BoardPage() {
               cards={byState(state)}
               onDropCard={handleDrop}
               onCardClick={(card: Card) => router.push(`/card/${card.id}`)}
+              draggingCardState={draggingCard?.state}
+              onCardDragStart={setDraggingCard}
+              onCardDragEnd={() => setDraggingCard(null)}
               renderCardFooter={
                 state === "awaiting_approval"
                   ? (card) => (
