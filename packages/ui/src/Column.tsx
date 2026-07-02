@@ -20,13 +20,23 @@ export function Column({ state, title, cards, onDropCard, onCardClick, renderCar
         const cardId = e.dataTransfer.getData("text/card-id");
         if (cardId) onDropCard?.(cardId, state);
       }}
-      className="min-w-[220px] flex-[1_0_220px] rounded-lg bg-muted p-2.5"
+      style={{
+        minWidth: 220,
+        flex: "1 0 220px",
+        background: "#f7fafc",
+        borderRadius: 8,
+        padding: 10,
+      }}
     >
-      <div className="mb-2 text-xs font-bold uppercase text-muted-foreground">
-        {title} <span className="text-muted-foreground/70">({cards.length})</span>
+      <div style={{ fontSize: 12, fontWeight: 700, textTransform: "uppercase", color: "#4a5568", marginBottom: 8 }}>
+        {title} <span style={{ color: "#a0aec0" }}>({cards.length})</span>
       </div>
       {cards.map((card) => (
-        <div key={card.id} draggable onDragStart={(e) => e.dataTransfer.setData("text/card-id", card.id)}>
+        <div
+          key={card.id}
+          draggable
+          onDragStart={(e) => e.dataTransfer.setData("text/card-id", card.id)}
+        >
           <CardTile card={card} onClick={onCardClick} draggable={false} />
           {renderCardFooter?.(card)}
         </div>

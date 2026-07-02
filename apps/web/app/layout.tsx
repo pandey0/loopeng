@@ -1,7 +1,6 @@
 import type { ReactNode } from "react";
 import Link from "next/link";
 import { QueryProvider } from "./providers/QueryProvider";
-import "./globals.css";
 
 export const metadata = {
   title: "LoopEng",
@@ -11,18 +10,22 @@ export const metadata = {
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
     <html lang="en">
-      <body className="m-0 font-sans text-foreground antialiased">
+      <body style={{ margin: 0, fontFamily: "system-ui, sans-serif", color: "#1a202c" }}>
         <QueryProvider>
-          <nav className="flex items-center gap-5 border-b px-5 py-3 text-sm">
+          <nav
+            style={{
+              display: "flex",
+              gap: 20,
+              padding: "12px 20px",
+              borderBottom: "1px solid #e2e8f0",
+              fontSize: 14,
+            }}
+          >
             <strong>LoopEng</strong>
-            <Link href="/board" className="text-muted-foreground hover:text-foreground">
-              Board
-            </Link>
-            <Link href="/docs" className="text-muted-foreground hover:text-foreground">
-              Docs
-            </Link>
+            <Link href="/board">Board</Link>
+            <Link href="/docs">Docs</Link>
           </nav>
-          <main className="p-5">{children}</main>
+          <main style={{ padding: 20 }}>{children}</main>
         </QueryProvider>
       </body>
     </html>

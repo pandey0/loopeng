@@ -1,17 +1,9 @@
 import type { Card } from "@loopeng/shared";
-import { cn } from "./lib/utils";
-import { Badge } from "./components/badge";
 
-const RISK_BORDER_CLASS: Record<Card["riskTier"], string> = {
-  low: "border-l-success",
-  medium: "border-l-warning",
-  high: "border-l-destructive",
-};
-
-const RISK_BADGE_VARIANT: Record<Card["riskTier"], "success" | "warning" | "destructive"> = {
-  low: "success",
-  medium: "warning",
-  high: "destructive",
+const RISK_COLOR: Record<Card["riskTier"], string> = {
+  low: "#2f855a",
+  medium: "#b7791f",
+  high: "#c53030",
 };
 
 export interface CardTileProps {
@@ -27,24 +19,21 @@ export function CardTile({ card, draggable = true, onDragStart, onClick }: CardT
       draggable={draggable}
       onDragStart={() => onDragStart?.(card)}
       onClick={() => onClick?.(card)}
-      className={cn(
-        "mb-2 rounded-md border border-l-4 bg-card p-2.5 shadow-sm",
-        RISK_BORDER_CLASS[card.riskTier],
-        draggable ? "cursor-grab" : "cursor-pointer",
-      )}
+      style={{
+        border: "1px solid #e2e8f0",
+        borderLeft: `4px solid ${RISK_COLOR[card.riskTier]}`,
+        borderRadius: 6,
+        padding: "8px 10px",
+        marginBottom: 8,
+        background: "#fff",
+        cursor: draggable ? "grab" : "pointer",
+      }}
     >
-      <div className="text-sm font-semibold">{card.title}</div>
-      <div className="mt-1 flex items-center gap-2 text-xs text-muted-foreground">
+      <div style={{ fontSize: 13, fontWeight: 600 }}>{card.title}</div>
+      <div style={{ fontSize: 11, color: "#718096", marginTop: 4, display: "flex", gap: 8 }}>
         <span>{card.cardType}</span>
         <span>P{card.priority}</span>
-        <Badge variant={RISK_BADGE_VARIANT[card.riskTier]} className="px-1.5 py-0 text-[10px]">
-          {card.riskTier}
-        </Badge>
-        {card.touchesArchitecture && (
-          <span title="touches architecture" className="font-semibold">
-            ADR
-          </span>
-        )}
+        {card.touchesArchitecture && <span title="touches architecture">ADR</span>}
       </div>
     </div>
   );

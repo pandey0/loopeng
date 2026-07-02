@@ -43,19 +43,19 @@ export function ActivityFeed({ boardId }: { boardId: string | null }) {
   }, [boardId, queryClient]);
 
   return (
-    <div className="min-w-[260px] flex-[0_0_280px] rounded-lg bg-muted p-2.5">
-      <div className="mb-2 text-xs font-bold uppercase text-muted-foreground">Activity</div>
+    <div style={{ minWidth: 260, flex: "0 0 280px", background: "#f7fafc", borderRadius: 8, padding: 10 }}>
+      <div style={{ fontSize: 12, fontWeight: 700, textTransform: "uppercase", color: "#4a5568", marginBottom: 8 }}>
+        Activity
+      </div>
       {events.length === 0 ? (
-        <p className="text-xs text-muted-foreground">No activity yet.</p>
+        <p style={{ fontSize: 12, color: "#718096" }}>No activity yet.</p>
       ) : (
-        <ul className="m-0 list-none p-0 text-xs">
+        <ul style={{ fontSize: 12, listStyle: "none", padding: 0, margin: 0 }}>
           {events.map((event) => (
-            <li key={event.id} className="mb-1.5">
-              <span className="text-muted-foreground">{new Date(event.createdAt).toLocaleTimeString()}</span>{" "}
+            <li key={event.id} style={{ marginBottom: 6 }}>
+              <span style={{ color: "#718096" }}>{new Date(event.createdAt).toLocaleTimeString()}</span>{" "}
               {event.entityType === "card" ? (
-                <Link href={`/card/${event.entityId}`} className="text-primary hover:underline">
-                  {describeEvent(event)}
-                </Link>
+                <Link href={`/card/${event.entityId}`}>{describeEvent(event)}</Link>
               ) : (
                 describeEvent(event)
               )}

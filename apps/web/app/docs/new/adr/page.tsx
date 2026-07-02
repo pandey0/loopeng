@@ -42,7 +42,7 @@ export default function NewAdrPage() {
 
   return (
     <div>
-      <h1 className="mb-4 text-2xl font-bold">New ADR</h1>
+      <h1>New ADR</h1>
       <AdrForm
         templateContent={templateQuery.data?.content ?? ""}
         onSubmit={handleSubmit}

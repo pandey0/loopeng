@@ -1,8 +1,4 @@
 import { useState } from "react";
-import { Label } from "./components/label";
-import { Input } from "./components/input";
-import { Textarea } from "./components/textarea";
-import { Button } from "./components/button";
 
 export interface AdrFormValues {
   title: string;
@@ -31,23 +27,41 @@ export function AdrForm({ templateContent, onSubmit, submitting = false }: AdrFo
           content,
         });
       }}
-      className="flex max-w-[720px] flex-col gap-3"
+      style={{ display: "flex", flexDirection: "column", gap: 12, maxWidth: 720 }}
     >
-      <Label>
-        Title
-        <Input value={title} onChange={(e) => setTitle(e.target.value)} required className="mt-1" />
-      </Label>
-      <Label>
-        Tags (comma separated)
-        <Input value={tags} onChange={(e) => setTags(e.target.value)} className="mt-1" />
-      </Label>
-      <Label>
-        Content
-        <Textarea value={content} onChange={(e) => setContent(e.target.value)} rows={18} className="mt-1" />
-      </Label>
-      <Button type="submit" disabled={submitting}>
+      <label>
+        <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 4 }}>Title</div>
+        <input
+          value={title}
+          onChange={(e) => setTitle(e.target.value)}
+          required
+          style={{ width: "100%", padding: 8, border: "1px solid #cbd5e0", borderRadius: 4 }}
+        />
+      </label>
+      <label>
+        <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 4 }}>Tags (comma separated)</div>
+        <input
+          value={tags}
+          onChange={(e) => setTags(e.target.value)}
+          style={{ width: "100%", padding: 8, border: "1px solid #cbd5e0", borderRadius: 4 }}
+        />
+      </label>
+      <label>
+        <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 4 }}>Content</div>
+        <textarea
+          value={content}
+          onChange={(e) => setContent(e.target.value)}
+          rows={18}
+          style={{ width: "100%", padding: 8, border: "1px solid #cbd5e0", borderRadius: 4, fontFamily: "monospace" }}
+        />
+      </label>
+      <button
+        type="submit"
+        disabled={submitting}
+        style={{ padding: "8px 16px", background: "#2b6cb0", color: "#fff", border: "none", borderRadius: 4 }}
+      >
         {submitting ? "Creating..." : "Create ADR"}
-      </Button>
+      </button>
     </form>
   );
 }
