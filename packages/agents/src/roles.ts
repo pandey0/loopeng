@@ -7,7 +7,7 @@ type Card = typeof cards.$inferSelect;
 import { getActiveWorktree, getRepoDiff } from "@loopeng/worktree-manager";
 import { runClaudeCli } from "./claude-cli.js";
 import { writeAgentLog } from "./logs.js";
-import { buildImplementerPrompt, buildReviewerPrompt, type SkillContext } from "./prompts.js";
+import { buildImplementerPrompt, buildReviewerPrompt, type SkillContext, type SpecDocContext } from "./prompts.js";
 
 export interface AgentRunResult {
   agentRunId: string;
@@ -42,6 +42,21 @@ async function loadRelevantSkills(card: Card): Promise<SkillContext[]> {
   return results;
 }
 
+async function loadLinkedSpecDocs(card: Card): Promise<SpecDocContext[]> {
+  const linkedRows = await db
+    .select()
+    .from(cardDocLinks)
+    .innerJoin(docsTable, eq(cardDocLinks.docId, docsTable.id))
+    .where(and(eq(cardDocLinks.cardId, card.id), eq(cardDocLinks.linkType, "spec")));
+
+  const results: SpecDocContext[] = [];
+  for (const row of linkedRows) {
+    const full = await getDoc(row.docs.slug);
+    if (full) results.push({ title: full.title, body: full.body });
+  }
+  return results;
+}
+
 async function getRoleId(name: string): Promise<string> {
   const [role] = await db.select().from(agentRoles).where(eq(agentRoles.name, name));
   if (!role) throw new Error(`agent role not seeded: ${name}`);
@@ -54,7 +69,8 @@ export async function runImplementerAgent(card: Card, priorFailureNote?: string)
 
   const roleId = await getRoleId("implementer");
   const skills = await loadRelevantSkills(card);
-  const prompt = buildImplementerPrompt(card, skills, priorFailureNote);
+  const specDocs = await loadLinkedSpecDocs(card);
+  const prompt = buildImplementerPrompt(card, skills, priorFailureNote, specDocs);
 
   const [run] = await db
     .insert(agentRuns)
@@ -88,7 +104,8 @@ export async function runReviewerAgent(card: Card): Promise<ReviewerRunResult> {
 
   const roleId = await getRoleId("reviewer");
   const diff = await getRepoDiff(worktree.fsPath, worktree.baseCommitSha);
-  const prompt = buildReviewerPrompt(card, diff);
+  const specDocs = await loadLinkedSpecDocs(card);
+  const prompt = buildReviewerPrompt(card, diff, specDocs);
 
   const [run] = await db
     .insert(agentRuns)
@@ -108,9 +125,13 @@ export async function runReviewerAgent(card: Card): Promise<ReviewerRunResult> {
   const logsRef = await writeAgentLog(run.id, result.raw);
 
   const verdictMatch = result.resultText.match(/VERDICT:\s*(PASS|FAIL)/i);
-  // Fail closed: no parseable verdict or a CLI error both count as "fail" so a
-  // broken review run can't silently wave a card through to the gate pipeline.
-  const verdict: "pass" | "fail" = !result.isError && verdictMatch?.[1]?.toUpperCase() === "PASS" ? "pass" : "fail";
+  const hasUnsatisfiedCriterion = /CRITERION:.*->\s*NOT SATISFIED/i.test(result.resultText);
+  // Fail closed: no parseable verdict, a CLI error, or any criterion marked
+  // NOT SATISFIED all count as "fail" so a broken review run — or a reviewer
+  // that flags a gap but still writes PASS — can't wave a card through to the
+  // gate pipeline.
+  const verdict: "pass" | "fail" =
+    !result.isError && !hasUnsatisfiedCriterion && verdictMatch?.[1]?.toUpperCase() === "PASS" ? "pass" : "fail";
 
   await db
     .update(agentRuns)
