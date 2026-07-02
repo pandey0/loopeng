@@ -16,11 +16,17 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const TEMPLATES_DIR = path.join(__dirname, "..", "templates");
 
 const repoRoot = process.env.WIKI_REPO_PATH ?? path.join(process.cwd(), "data", "wiki-repo");
-const gitClient = new GitDocClient(repoRoot);
+// Constructed lazily, not at module load: simple-git throws synchronously if
+// its baseDir doesn't exist yet, and nothing has mkdir'd repoRoot at import
+// time (that's ensureRepo()'s job). Any package that merely imports doc-engine
+// without ever calling a doc-touching function must not pay for — or crash
+// on — a git client it never uses.
+let gitClient: GitDocClient | null = null;
 let repoReady = false;
 
 async function ensureRepoReady() {
   if (!repoReady) {
+    gitClient ??= new GitDocClient(repoRoot);
     await gitClient.ensureRepo();
     repoReady = true;
   }
@@ -44,7 +50,7 @@ export async function createDoc(input: DocCreateInput) {
     created: new Date().toISOString().slice(0, 10),
   };
   const fileContent = stringifyDoc(frontmatter, input.content);
-  const sha = await gitClient.writeAndCommit(relPath, fileContent, input.message);
+  const sha = await gitClient!.writeAndCommit(relPath, fileContent, input.message);
 
   const [doc] = await db
     .insert(docs)
@@ -85,13 +91,13 @@ export async function updateDoc(slug: string, input: DocUpdateInput) {
   const [existing] = await db.select().from(docs).where(eq(docs.slug, slug));
   if (!existing) throw new Error(`doc not found: ${slug}`);
 
-  const { frontmatter } = parseDoc(await gitClient.readAtWorkingTree(existing.repoPath));
+  const { frontmatter } = parseDoc(await gitClient!.readAtWorkingTree(existing.repoPath));
   const nextFrontmatter: DocFrontmatter = {
     ...frontmatter,
     status: input.status ?? frontmatter.status,
   };
   const fileContent = stringifyDoc(nextFrontmatter, input.content);
-  const sha = await gitClient.writeAndCommit(existing.repoPath, fileContent, input.message);
+  const sha = await gitClient!.writeAndCommit(existing.repoPath, fileContent, input.message);
 
   const [updated] = await db
     .update(docs)
@@ -113,7 +119,8 @@ export async function updateDoc(slug: string, input: DocUpdateInput) {
 export async function getDoc(slug: string) {
   const [doc] = await db.select().from(docs).where(eq(docs.slug, slug));
   if (!doc) return null;
-  const { body, frontmatter } = parseDoc(await gitClient.readAtWorkingTree(doc.repoPath));
+  await ensureRepoReady();
+  const { body, frontmatter } = parseDoc(await gitClient!.readAtWorkingTree(doc.repoPath));
   return { ...doc, body, frontmatter };
 }
 

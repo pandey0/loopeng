@@ -4,10 +4,11 @@ import { agentRoles, agentRuns, cardDocLinks, cards, docs as docsTable } from "@
 import { getDoc, listDocs } from "@loopeng/doc-engine";
 
 type Card = typeof cards.$inferSelect;
-import { getActiveWorktree, getRepoDiff } from "@loopeng/worktree-manager";
+import { getActiveWorktree, getRepoDiff, resolveRepoRoot } from "@loopeng/worktree-manager";
 import { runClaudeCli } from "./claude-cli.js";
+import { parsePlannerOutput, persistDecomposition, PlannerOutputError, type PersistedDecomposition } from "./decomposition.js";
 import { writeAgentLog } from "./logs.js";
-import { buildImplementerPrompt, buildReviewerPrompt, type SkillContext, type SpecDocContext } from "./prompts.js";
+import { buildImplementerPrompt, buildPlannerPrompt, buildReviewerPrompt, type SkillContext, type SpecDocContext } from "./prompts.js";
 
 export interface AgentRunResult {
   agentRunId: string;
@@ -96,6 +97,63 @@ export async function runImplementerAgent(card: Card, priorFailureNote?: string)
     .where(eq(agentRuns.id, run.id));
 
   return { agentRunId: run.id, isError: result.isError, resultText: result.resultText, costUsd: result.totalCostUsd, logsRef };
+}
+
+export interface PlannerRunResult extends AgentRunResult, PersistedDecomposition {}
+
+// Turns a freeform product-owner request into a boarded epic + child cards.
+// Unlike the implementer/reviewer, the planner has no card or worktree yet —
+// it runs read-only against the main repo checkout (for codebase context)
+// and is never allowed to touch files; its entire output is the two fenced
+// blocks parsePlannerOutput expects. On success, the decomposition is
+// persisted and every child card is transitioned straight to "ready" so the
+// existing dispatch loop picks it up without a human touching the board.
+export async function runPlannerAgent(boardId: string, requestText: string): Promise<PlannerRunResult> {
+  const roleId = await getRoleId("planner");
+  const existingCards = await db.select({ title: cards.title }).from(cards).where(eq(cards.boardId, boardId));
+  const prompt = buildPlannerPrompt(
+    requestText,
+    existingCards.map((c) => c.title),
+  );
+
+  const [run] = await db
+    .insert(agentRuns)
+    .values({ agentRoleId: roleId, status: "running", startedAt: new Date() })
+    .returning();
+  if (!run) throw new Error("failed to insert agent_runs row");
+
+  const result = await runClaudeCli({
+    cwd: resolveRepoRoot(),
+    prompt,
+    permissionMode: "bypassPermissions",
+    disallowedTools: ["Edit", "Write", "NotebookEdit", "Bash"],
+  });
+  const logsRef = await writeAgentLog(run.id, result.raw);
+
+  if (result.isError) {
+    await db.update(agentRuns).set({ status: "failed", logsRef, finishedAt: new Date() }).where(eq(agentRuns.id, run.id));
+    throw new PlannerOutputError(`planner agent run failed: ${result.resultText.slice(0, 2000)}`);
+  }
+
+  let persisted: PersistedDecomposition;
+  try {
+    const parsed = parsePlannerOutput(result.resultText);
+    persisted = await persistDecomposition(boardId, parsed);
+  } catch (err) {
+    await db.update(agentRuns).set({ status: "failed", logsRef, finishedAt: new Date() }).where(eq(agentRuns.id, run.id));
+    throw err;
+  }
+
+  await db.update(agentRuns).set({ status: "succeeded", logsRef, finishedAt: new Date() }).where(eq(agentRuns.id, run.id));
+
+  return {
+    agentRunId: run.id,
+    isError: false,
+    resultText: result.resultText,
+    costUsd: result.totalCostUsd,
+    logsRef,
+    ...persisted,
+  };
 }
 
 export async function runReviewerAgent(card: Card): Promise<ReviewerRunResult> {

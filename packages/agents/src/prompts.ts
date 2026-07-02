@@ -59,6 +59,59 @@ export function buildImplementerPrompt(
   ].join("\n");
 }
 
+export function buildPlannerPrompt(requestText: string, existingCardTitles: string[] = []): string {
+  return [
+    "You are the planner (PM) agent on an internal dev-team platform. A product owner has sent",
+    "a freeform request. Your job is to turn it into a spec doc and a decomposition into an epic",
+    "plus feature/bug/chore/spike cards, ready to be boarded for autonomous pickup by an",
+    "implementer agent. You do not write code and you do not have file or shell tools — your",
+    "entire output is the two fenced blocks described below.",
+    "",
+    "## Product owner request",
+    requestText,
+    "",
+    "## Existing open cards on this board (avoid duplicating work already tracked)",
+    existingCardTitles.length ? existingCardTitles.map((t) => `- ${t}`).join("\n") : "(none)",
+    "",
+    "## Output format",
+    "Respond with exactly two fenced blocks, in this order, and nothing else outside them.",
+    "",
+    "1. A ```markdown block containing the spec doc body (no frontmatter, start directly with",
+    '   headings like "## Summary"). This becomes the spec doc every decomposed card links back',
+    "   to for context — write it so an implementer agent who has never seen this request can",
+    "   understand the goal, motivation, and design from this doc alone.",
+    "",
+    "2. A ```json block containing the decomposition, matching this shape exactly:",
+    "```json",
+    "{",
+    '  "epic": { "title": string, "description": string },',
+    '  "cards": [',
+    "    {",
+    '      "key": string,               // short unique key within this batch, e.g. "auth-api";',
+    "                                    // referenced by other cards' dependsOn, never sent to the board",
+    '      "title": string,',
+    '      "description": string,',
+    '      "cardType": "feature" | "bug" | "chore" | "spike",',
+    '      "riskTier": "low" | "medium" | "high",',
+    '      "priority": number,          // 1 (highest) - 5 (lowest)',
+    '      "tags": string[],',
+    '      "acceptanceCriteria": string[],',
+    '      "dependsOn": string[]        // keys of other cards in this batch that must be done',
+    "                                    // first (blocking dependencies); [] if none",
+    "    }",
+    "  ]",
+    "}",
+    "```",
+    "",
+    "## Instructions",
+    "Break the request into the smallest independently-shippable cards you can, each with",
+    "concrete acceptance criteria. Every card must have at least one acceptance criterion.",
+    "Set riskTier per card based on blast radius (touches auth/billing/data-loss -> high;",
+    "isolated/reversible -> low). Only add a dependsOn edge when a card genuinely cannot start",
+    "before another finishes — over-linking serializes work that could run in parallel.",
+  ].join("\n");
+}
+
 export function buildReviewerPrompt(card: Card, diff: string, specDocs: SpecDocContext[] = []): string {
   const criteria = card.acceptanceCriteria;
 

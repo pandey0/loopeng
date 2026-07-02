@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { cards } from "@loopeng/db";
-import { buildImplementerPrompt, buildReviewerPrompt } from "./prompts";
+import { buildImplementerPrompt, buildPlannerPrompt, buildReviewerPrompt } from "./prompts";
 
 type Card = typeof cards.$inferSelect;
 
@@ -49,6 +49,27 @@ describe("buildImplementerPrompt", () => {
     expect(prompt).toContain("## Linked spec docs");
     expect(prompt).toContain("### Spec: Auth Spec");
     expect(prompt).toContain("All requests must be authenticated.");
+  });
+});
+
+describe("buildPlannerPrompt", () => {
+  it("includes the product owner request and json schema fields", () => {
+    const prompt = buildPlannerPrompt("Add SSO login for enterprise customers");
+    expect(prompt).toContain("Add SSO login for enterprise customers");
+    expect(prompt).toContain('"epic"');
+    expect(prompt).toContain('"dependsOn"');
+    expect(prompt).toContain("```markdown");
+    expect(prompt).toContain("```json");
+  });
+
+  it("lists existing open card titles to avoid duplication", () => {
+    const prompt = buildPlannerPrompt("Add SSO login", ["Existing OAuth card"]);
+    expect(prompt).toContain("- Existing OAuth card");
+  });
+
+  it("notes when there are no existing cards", () => {
+    const prompt = buildPlannerPrompt("Add SSO login", []);
+    expect(prompt).toContain("(none)");
   });
 });
 

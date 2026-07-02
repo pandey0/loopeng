@@ -134,6 +134,13 @@ export const CardUpdateInputSchema = z
   });
 export type CardUpdateInput = z.infer<typeof CardUpdateInputSchema>;
 
+export const IntakeInputSchema = z.object({
+  boardId: uuid,
+  requestText: z.string().min(1),
+  requestedById: uuid.optional(),
+});
+export type IntakeInput = z.infer<typeof IntakeInputSchema>;
+
 export const CardTransitionInputSchema = z.object({
   toState: z.enum(CARD_STATES),
   actorType: z.enum(["user", "agent", "automation"]).default("user"),

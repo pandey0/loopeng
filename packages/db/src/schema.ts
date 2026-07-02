@@ -85,7 +85,7 @@ export const cards = pgTable("cards", {
     .references(() => boards.id, { onDelete: "cascade" }),
   title: text("title").notNull(),
   description: text("description"),
-  cardType: text("card_type").notNull().default("feature"), // feature|bug|chore|spike
+  cardType: text("card_type").notNull().default("feature"), // epic|feature|bug|chore|spike
   state: text("state").notNull().default("backlog"),
   riskTier: text("risk_tier").notNull().default("low"), // low|medium|high
   touchesArchitecture: boolean("touches_architecture").notNull().default(false),
@@ -135,7 +135,7 @@ export const cardDependencies = pgTable(
 // ===== Agents (Phase 2+, tables scaffolded now for FK stability) =====
 export const agentRoles = pgTable("agent_roles", {
   id: uuid("id").primaryKey().defaultRandom(),
-  name: text("name").notNull(), // 'implementer' | 'reviewer' | 'triager' | 'doc-scanner'
+  name: text("name").notNull(), // 'implementer' | 'reviewer' | 'triager' | 'doc-scanner' | 'planner'
   description: text("description"),
   capabilities: text("capabilities").array().notNull().default(sql`'{}'::text[]`),
   modelConfig: jsonb("model_config").notNull().default({}),
