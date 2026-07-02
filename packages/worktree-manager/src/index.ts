@@ -5,7 +5,7 @@ import { and, eq } from "drizzle-orm";
 import { db } from "@loopeng/db";
 import { cards, worktrees } from "@loopeng/db";
 
-function resolveRepoRoot(): string {
+export function resolveRepoRoot(): string {
   if (process.env.TARGET_REPO_PATH) return process.env.TARGET_REPO_PATH;
   return execSync("git rev-parse --show-toplevel", { encoding: "utf-8" }).trim();
 }

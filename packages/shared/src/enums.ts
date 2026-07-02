@@ -12,8 +12,18 @@ export const CARD_STATES = [
 ] as const;
 export type CardState = (typeof CARD_STATES)[number];
 
-export const CARD_TYPES = ["feature", "bug", "chore", "spike"] as const;
+export const CARD_TYPES = ["epic", "feature", "bug", "chore", "spike"] as const;
 export type CardType = (typeof CARD_TYPES)[number];
+
+// Decomposition output of the planner agent never assigns "epic" to a leaf
+// card — epic is reserved for the single parent card it drafts per intake
+// request, so gate/agent pickup logic never tries to "implement" an epic.
+// Kept as its own literal tuple (not CARD_TYPES.filter(...)) so zod's
+// z.enum(), which requires a readonly non-empty tuple type, can consume it.
+export const PLANNER_CHILD_CARD_TYPES = ["feature", "bug", "chore", "spike"] as const satisfies readonly Exclude<
+  CardType,
+  "epic"
+>[];
 
 export const RISK_TIERS = ["low", "medium", "high"] as const;
 export type RiskTier = (typeof RISK_TIERS)[number];

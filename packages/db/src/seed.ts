@@ -42,6 +42,11 @@ async function main() {
     { name: "reviewer", description: "Sub-agent verification of implementer output before gates run", capabilities: ["review"] },
     { name: "triager", description: "Scans backlog/board on a schedule and prepares cards", capabilities: ["triage"] },
     { name: "doc-scanner", description: "Detects doc/code drift", capabilities: ["docs"] },
+    {
+      name: "planner",
+      description: "Turns a freeform product-owner request into a spec doc plus epic/feature/bug cards, ready for auto-pickup",
+      capabilities: ["planning"],
+    },
   ]);
 
   await db.insert(gateDefinitions).values([
