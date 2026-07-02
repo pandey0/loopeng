@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Column } from "@loopeng/ui";
+import { Column, Button } from "@loopeng/ui";
 import type { Card, CardState } from "@loopeng/shared";
 import { api } from "../../lib/api";
 import { ActivityFeed } from "./ActivityFeed";
@@ -72,18 +72,26 @@ export default function BoardPage() {
 
   return (
     <div>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
-        <select value={boardId ?? ""} onChange={(e) => setBoardId(e.target.value)}>
+      <div className="mb-4 flex items-center justify-between">
+        <select
+          value={boardId ?? ""}
+          onChange={(e) => setBoardId(e.target.value)}
+          className="h-9 rounded-md border border-input bg-background px-3 text-sm shadow-sm"
+        >
           {boardsQuery.data.map((b) => (
             <option key={b.id} value={b.id}>
               {b.name}
             </option>
           ))}
         </select>
-        {boardId && <Link href={`/board/${boardId}/graph`}>Dependency graph →</Link>}
+        {boardId && (
+          <Link href={`/board/${boardId}/graph`} className="text-sm text-primary hover:underline">
+            Dependency graph →
+          </Link>
+        )}
       </div>
-      <div style={{ display: "flex", gap: 12 }}>
-        <div style={{ display: "flex", gap: 12, overflowX: "auto", flex: 1 }}>
+      <div className="flex gap-3">
+        <div className="flex flex-1 gap-3 overflow-x-auto">
           {PHASE_3_COLUMNS.map(({ state, title }) => (
             <Column
               key={state}
@@ -95,12 +103,9 @@ export default function BoardPage() {
               renderCardFooter={
                 state === "awaiting_approval"
                   ? (card) => (
-                      <button
-                        onClick={() => handleApprove(card.id)}
-                        style={{ fontSize: 11, padding: "4px 8px", marginTop: -4, marginBottom: 8, cursor: "pointer" }}
-                      >
+                      <Button size="sm" onClick={() => handleApprove(card.id)} className="-mt-1 mb-2 h-auto px-2 py-1 text-[11px]">
                         Approve → Deploy
-                      </button>
+                      </Button>
                     )
                   : undefined
               }

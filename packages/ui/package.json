@@ -13,7 +13,10 @@
   },
   "dependencies": {
     "@loopeng/shared": "workspace:*",
-    "react-markdown": "^9.0.1"
+    "class-variance-authority": "^0.7.0",
+    "clsx": "^2.1.1",
+    "react-markdown": "^9.0.1",
+    "tailwind-merge": "^2.5.4"
   },
   "devDependencies": {
     "@types/react": "^18.3.12",
