@@ -47,7 +47,7 @@ export default function DependencyGraphPage({ params }: { params: Promise<{ boar
   }));
 
   return (
-    <div style={{ height: "80vh", border: "1px solid #e2e8f0", borderRadius: 8 }}>
+    <div className="h-[80vh] rounded-lg border">
       <ReactFlow nodes={nodes} edges={edges} fitView>
         <Background />
         <Controls />
