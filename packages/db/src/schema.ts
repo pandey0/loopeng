@@ -147,9 +147,13 @@ export const agentRuns = pgTable("agent_runs", {
   cardId: uuid("card_id").references(() => cards.id, { onDelete: "cascade" }),
   agentRoleId: uuid("agent_role_id").references(() => agentRoles.id),
   worktreeId: uuid("worktree_id").references((): AnyPgColumn => worktrees.id),
+  parentAgentRunId: uuid("parent_agent_run_id").references((): AnyPgColumn => agentRuns.id),
   status: text("status").notNull().default("queued"), // queued|running|succeeded|failed|verifying
   verdict: text("verdict"), // pass | fail (sub-agent verification runs)
   logsRef: text("logs_ref"),
+  // Incrementally-appended stream-json events for interactive sessions (card A+).
+  // Empty for one-shot runClaudeCli runs, which only ever populate the final result.
+  transcript: jsonb("transcript").notNull().default([]),
   startedAt: timestamp("started_at", { withTimezone: true }),
   finishedAt: timestamp("finished_at", { withTimezone: true }),
 });
