@@ -22,6 +22,13 @@
       "when": 1782925021032,
       "tag": "0002_green_machine_man",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1783013900209,
+      "tag": "0003_nostalgic_jimmy_woo",
+      "breakpoints": true
     }
   ]
 }
