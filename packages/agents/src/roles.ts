@@ -9,6 +9,7 @@ import { runClaudeCli } from "./claude-cli.js";
 import { parsePlannerOutput, persistDecomposition, PlannerOutputError, type PersistedDecomposition } from "./decomposition.js";
 import { writeAgentLog } from "./logs.js";
 import { buildImplementerPrompt, buildPlannerPrompt, buildReviewerPrompt, type SkillContext, type SpecDocContext } from "./prompts.js";
+import { buildSubAgentMcpConfig } from "./sub-agent.js";
 
 export interface AgentRunResult {
   agentRunId: string;
@@ -58,7 +59,7 @@ async function loadLinkedSpecDocs(card: Card): Promise<SpecDocContext[]> {
   return results;
 }
 
-async function getRoleId(name: string): Promise<string> {
+export async function getRoleId(name: string): Promise<string> {
   const [role] = await db.select().from(agentRoles).where(eq(agentRoles.name, name));
   if (!role) throw new Error(`agent role not seeded: ${name}`);
   return role.id;
@@ -84,7 +85,14 @@ export async function runImplementerAgent(card: Card, priorFailureNote?: string)
   // test runs — the agent reports success but never actually finishes. The
   // worktree is the real isolation boundary here (a physically separate
   // checkout the agent cwd is pinned to), so full autonomy inside it is safe.
-  const result = await runClaudeCli({ cwd: worktree.fsPath, prompt, permissionMode: "bypassPermissions" });
+  const mcpConfig = buildSubAgentMcpConfig({
+    parentAgentRunId: run.id,
+    cardId: card.id,
+    worktreeId: worktree.id,
+    cwd: worktree.fsPath,
+    depth: 1,
+  });
+  const result = await runClaudeCli({ cwd: worktree.fsPath, prompt, permissionMode: "bypassPermissions", mcpConfig });
   const logsRef = await writeAgentLog(run.id, result.raw);
 
   await db
@@ -123,11 +131,21 @@ export async function runPlannerAgent(boardId: string, requestText: string): Pro
     .returning();
   if (!run) throw new Error("failed to insert agent_runs row");
 
+  const plannerDisallowedTools = ["Edit", "Write", "NotebookEdit", "Bash"];
+  const mcpConfig = buildSubAgentMcpConfig({
+    parentAgentRunId: run.id,
+    cardId: null,
+    worktreeId: null,
+    cwd: resolveRepoRoot(),
+    depth: 1,
+    disallowedTools: plannerDisallowedTools,
+  });
   const result = await runClaudeCli({
     cwd: resolveRepoRoot(),
     prompt,
     permissionMode: "bypassPermissions",
-    disallowedTools: ["Edit", "Write", "NotebookEdit", "Bash"],
+    disallowedTools: plannerDisallowedTools,
+    mcpConfig,
   });
   const logsRef = await writeAgentLog(run.id, result.raw);
 
@@ -175,11 +193,24 @@ export async function runReviewerAgent(card: Card): Promise<ReviewerRunResult> {
   // Read-only enforcement lives in disallowedTools, not permissionMode —
   // bypassPermissions still lets the reviewer run Bash (e.g. tests) inside
   // the worktree without a TTY to approve it, but it can never Edit/Write.
+  const reviewerDisallowedTools = ["Edit", "Write", "NotebookEdit"];
+  // A sub-agent spawned by the reviewer inherits the same restriction — the
+  // reviewer's read-only guarantee shouldn't be escapable by delegating the
+  // edit to a sub-agent.
+  const mcpConfig = buildSubAgentMcpConfig({
+    parentAgentRunId: run.id,
+    cardId: card.id,
+    worktreeId: worktree.id,
+    cwd: worktree.fsPath,
+    depth: 1,
+    disallowedTools: reviewerDisallowedTools,
+  });
   const result = await runClaudeCli({
     cwd: worktree.fsPath,
     prompt,
     permissionMode: "bypassPermissions",
-    disallowedTools: ["Edit", "Write", "NotebookEdit"],
+    disallowedTools: reviewerDisallowedTools,
+    mcpConfig,
   });
   const logsRef = await writeAgentLog(run.id, result.raw);
 

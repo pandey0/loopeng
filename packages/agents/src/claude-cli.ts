@@ -11,6 +11,8 @@ export interface RunClaudeCliInput {
   disallowedTools?: string[];
   model?: string;
   maxBudgetUsd?: number;
+  /** MCP server config (e.g. sub-agent delegation), passed inline as JSON via --mcp-config. */
+  mcpConfig?: Record<string, unknown>;
 }
 
 export interface ClaudeCliResult {
@@ -33,6 +35,7 @@ export function runClaudeCli(input: RunClaudeCliInput): Promise<ClaudeCliResult>
   if (input.disallowedTools?.length) args.push("--disallowedTools", input.disallowedTools.join(","));
   if (input.maxBudgetUsd) args.push("--max-budget-usd", String(input.maxBudgetUsd));
   if (input.appendSystemPrompt) args.push("--append-system-prompt", input.appendSystemPrompt);
+  if (input.mcpConfig) args.push("--mcp-config", JSON.stringify(input.mcpConfig));
 
   return new Promise((resolve, reject) => {
     const child = spawn("claude", args, { cwd: input.cwd, env: process.env });
@@ -87,6 +90,7 @@ export interface RunClaudeCliStreamingInput {
   allowedTools?: string[];
   disallowedTools?: string[];
   model?: string;
+  mcpConfig?: Record<string, unknown>;
 }
 
 export interface StreamingSession {
@@ -145,6 +149,7 @@ export function runClaudeCliStreaming(input: RunClaudeCliStreamingInput): Stream
   if (input.allowedTools?.length) args.push("--allowedTools", input.allowedTools.join(","));
   if (input.disallowedTools?.length) args.push("--disallowedTools", input.disallowedTools.join(","));
   if (input.appendSystemPrompt) args.push("--append-system-prompt", input.appendSystemPrompt);
+  if (input.mcpConfig) args.push("--mcp-config", JSON.stringify(input.mcpConfig));
 
   const child = spawn("claude", args, { cwd: input.cwd, env: process.env });
 
