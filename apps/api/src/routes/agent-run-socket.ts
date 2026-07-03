@@ -33,10 +33,18 @@ export const agentRunSocketRoutes: FastifyPluginAsync = async (fastify) => {
     const session = sessionRegistry.get(id);
 
     if (!session) {
-      // No live session: this run either doesn't exist or already finished.
-      // Either way, playback-only -- stream what's persisted and close.
+      // No live session: this run either already finished or never existed.
       const [run] = await fastify.db.select({ transcript: agentRuns.transcript }).from(agentRuns).where(eq(agentRuns.id, id));
-      const transcript = (run?.transcript as StreamEvent[] | undefined) ?? [];
+      if (!run) {
+        // Unknown agent_runs id -- distinct from "finished with an empty
+        // transcript" so a client can tell a bad id apart from a real,
+        // still-empty run. 4004 mirrors HTTP 404 in the WS close-code space
+        // (4000-4999 is the app-defined range per RFC 6455).
+        socket.close(4004, "agent run not found");
+        return;
+      }
+      // Playback-only: stream what's persisted and close.
+      const transcript = (run.transcript as StreamEvent[] | undefined) ?? [];
       for (const event of transcript) send(socket, event);
       socket.close();
       return;
