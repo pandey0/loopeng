@@ -16,7 +16,8 @@
       "dependsOn": ["^build"]
     },
     "test": {
-      "dependsOn": ["^build"]
+      "dependsOn": ["^build"],
+      "env": ["DATABASE_URL"]
     }
   }
 }
