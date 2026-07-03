@@ -5,7 +5,7 @@ import { getDoc, listDocs } from "@loopeng/doc-engine";
 
 type Card = typeof cards.$inferSelect;
 import { getActiveWorktree, getRepoDiff, resolveRepoRoot } from "@loopeng/worktree-manager";
-import { runClaudeCli } from "./claude-cli.js";
+import { runClaudeCliStreamingOnce } from "./claude-cli.js";
 import { parsePlannerOutput, persistDecomposition, PlannerOutputError, type PersistedDecomposition } from "./decomposition.js";
 import { writeAgentLog } from "./logs.js";
 import { buildImplementerPrompt, buildPlannerPrompt, buildReviewerPrompt, type SkillContext, type SpecDocContext } from "./prompts.js";
@@ -92,7 +92,13 @@ export async function runImplementerAgent(card: Card, priorFailureNote?: string)
     cwd: worktree.fsPath,
     depth: 1,
   });
-  const result = await runClaudeCli({ cwd: worktree.fsPath, prompt, permissionMode: "bypassPermissions", mcpConfig });
+  const result = await runClaudeCliStreamingOnce({
+    cwd: worktree.fsPath,
+    agentRunId: run.id,
+    prompt,
+    permissionMode: "bypassPermissions",
+    mcpConfig,
+  });
   const logsRef = await writeAgentLog(run.id, result.raw);
 
   await db
@@ -140,8 +146,9 @@ export async function runPlannerAgent(boardId: string, requestText: string): Pro
     depth: 1,
     disallowedTools: plannerDisallowedTools,
   });
-  const result = await runClaudeCli({
+  const result = await runClaudeCliStreamingOnce({
     cwd: resolveRepoRoot(),
+    agentRunId: run.id,
     prompt,
     permissionMode: "bypassPermissions",
     disallowedTools: plannerDisallowedTools,
@@ -205,8 +212,9 @@ export async function runReviewerAgent(card: Card): Promise<ReviewerRunResult> {
     depth: 1,
     disallowedTools: reviewerDisallowedTools,
   });
-  const result = await runClaudeCli({
+  const result = await runClaudeCliStreamingOnce({
     cwd: worktree.fsPath,
+    agentRunId: run.id,
     prompt,
     permissionMode: "bypassPermissions",
     disallowedTools: reviewerDisallowedTools,
