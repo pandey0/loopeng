@@ -1,6 +1,6 @@
 import type { FastifyPluginAsync } from "fastify";
 import { and, desc, eq } from "drizzle-orm";
-import { applyTransition, wouldCreateCycle } from "@loopeng/board-engine";
+import { applyTransition, attachCardStatus, wouldCreateCycle } from "@loopeng/board-engine";
 import {
   agentRoles,
   agentRuns,
@@ -23,10 +23,10 @@ import {
 export const cardRoutes: FastifyPluginAsync = async (fastify) => {
   fastify.get("/cards", async (request) => {
     const { boardId } = request.query as { boardId?: string };
-    if (boardId) {
-      return fastify.db.select().from(cards).where(eq(cards.boardId, boardId));
-    }
-    return fastify.db.select().from(cards);
+    const cardRows = boardId
+      ? await fastify.db.select().from(cards).where(eq(cards.boardId, boardId))
+      : await fastify.db.select().from(cards);
+    return attachCardStatus(cardRows);
   });
 
   fastify.post("/cards", async (request, reply) => {
