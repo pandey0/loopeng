@@ -1,8 +1,9 @@
+import { randomUUID } from "node:crypto";
 import Fastify, { type FastifyInstance } from "fastify";
 import websocketPlugin from "@fastify/websocket";
 import { eq } from "drizzle-orm";
 import { agentRuns, db, pool } from "@loopeng/db";
-import { sessionRegistry, type StreamEvent, type StreamingSession } from "@loopeng/agents";
+import { runClaudeCliStreaming, sessionRegistry, type StreamEvent, type StreamingSession } from "@loopeng/agents";
 import { WebSocket } from "ws";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
 import { agentRunSocketRoutes } from "./agent-run-socket.js";
@@ -106,6 +107,30 @@ function waitForCount(messages: unknown[], count: number, timeoutMs = 2000): Pro
   });
 }
 
+// Polls `messages` (mutated in place by the `connect()` "message" listener)
+// for an event matching `predicate`, starting from index `fromIndex`. Used
+// instead of a fixed waitForCount because the streaming CLI's event ordering
+// (partial-message deltas, etc.) around a given result/echo isn't fixed.
+function waitForEvent(
+  messages: StreamEvent[],
+  predicate: (event: StreamEvent, index: number) => boolean,
+  timeoutMs = 2000,
+  fromIndex = 0,
+): Promise<StreamEvent> {
+  return new Promise((resolve, reject) => {
+    const start = Date.now();
+    const check = () => {
+      for (let i = fromIndex; i < messages.length; i++) {
+        const event = messages[i];
+        if (event && predicate(event, i)) return resolve(event);
+      }
+      if (Date.now() - start > timeoutMs) return reject(new Error(`timed out waiting for matching event, got ${messages.length} messages`));
+      setTimeout(check, 25);
+    };
+    check();
+  });
+}
+
 function waitForClose(ws: WebSocket, timeoutMs = 2000): Promise<void> {
   if (ws.readyState === WebSocket.CLOSED) return Promise.resolve();
   return new Promise((resolve, reject) => {
@@ -175,6 +200,24 @@ describe("agent-run-socket route", () => {
     }
   });
 
+  it("closes with 4004 and streams nothing for an unknown agent_runs id", async () => {
+    const { app, url } = await buildApp();
+    try {
+      const { ws, messages } = await connect(url, randomUUID());
+      const closeCode = await new Promise<number>((resolve, reject) => {
+        const timeout = setTimeout(() => reject(new Error("timed out waiting for socket close")), 2000);
+        ws.once("close", (code) => {
+          clearTimeout(timeout);
+          resolve(code);
+        });
+      });
+      expect(closeCode).toBe(4004);
+      expect(messages).toEqual([]);
+    } finally {
+      await app.close();
+    }
+  });
+
   it("streams the persisted transcript once and closes for a completed run, accepting no input", async () => {
     const persistedTranscript: StreamEvent[] = [
       { type: "assistant", message: { role: "assistant", content: [{ type: "text", text: "done" }] } },
@@ -202,4 +245,71 @@ describe("agent-run-socket route", () => {
       await app.close();
     }
   });
+
+  // Real (non-mocked) integration test: a real claude CLI child process,
+  // registered in the actual sessionRegistry, reached only through the WS
+  // route's socket.on("message") handler -- not by calling session.sendInput()
+  // directly. Proves the WS input relay itself (JSON parse -> isInputMessage
+  // -> session.sendInput) works against a live process, not just that
+  // sendInput() works when called in-process (that's covered separately by
+  // claude-cli.streaming.test.ts). Requires the `claude` CLI installed and
+  // authenticated, same as that test.
+  it(
+    "relays input sent over the socket to a real claude CLI process and changes its next reply",
+    async () => {
+      const inserted = await db.insert(agentRuns).values({ status: "running" }).returning({ id: agentRuns.id });
+      const run = inserted[0];
+      if (!run) throw new Error("insert did not return a row");
+      createdRunIds.push(run.id);
+
+      const session = runClaudeCliStreaming({
+        cwd: process.cwd(),
+        agentRunId: run.id,
+        prompt: 'Reply with exactly the word "ALPHA" and nothing else.',
+        permissionMode: "bypassPermissions",
+        model: "claude-haiku-4-5-20251001",
+        disallowedTools: ["Bash", "Read", "Write", "Edit"],
+      });
+      expect(sessionRegistry.get(run.id)).toBe(session);
+
+      const { app, url } = await buildApp();
+      try {
+        const { ws, messages } = await connect(url, run.id);
+
+        // Wait for the first turn's result event (whether replayed-so-far or
+        // streamed live -- the child may finish the first turn before or
+        // after the socket connects).
+        const firstResult = await waitForEvent(messages, (e) => e.type === "result", 30_000);
+        expect(firstResult.is_error).toBeFalsy();
+        expect(typeof firstResult.result === "string" ? firstResult.result : "").toContain("ALPHA");
+
+        const beforeInputCount = messages.length;
+
+        // The actual assertion: send input over the WebSocket wire, not by
+        // calling session.sendInput() in-process.
+        ws.send(JSON.stringify({ type: "input", text: 'Now reply with exactly the word "BRAVO" and nothing else.' }));
+
+        // The relay must both (a) reach the CLI's stdin, changing its next
+        // reply, and (b) echo the human-originated turn back to subscribers.
+        const echoedInput = await waitForEvent(
+          messages,
+          (e) => e.type === "user" && e.actor_type === "human",
+          20_000,
+          beforeInputCount,
+        );
+        expect((echoedInput.message as { content: { text: string }[] }).content[0]?.text).toContain("BRAVO");
+
+        const secondResult = await waitForEvent(messages, (e, i) => i >= beforeInputCount && e.type === "result", 30_000);
+        expect(secondResult.is_error).toBeFalsy();
+        expect(typeof secondResult.result === "string" ? secondResult.result : "").toContain("BRAVO");
+
+        ws.close();
+      } finally {
+        session.close();
+        await session.waitForExit();
+        await app.close();
+      }
+    },
+    60_000,
+  );
 });
