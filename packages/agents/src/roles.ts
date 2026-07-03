@@ -5,7 +5,7 @@ import { getDoc, listDocs } from "@loopeng/doc-engine";
 
 type Card = typeof cards.$inferSelect;
 import { getActiveWorktree, getRepoDiff, resolveRepoRoot } from "@loopeng/worktree-manager";
-import { runClaudeCli } from "./claude-cli.js";
+import { runClaudeCliStreamingOnce } from "./claude-cli.js";
 import { parsePlannerOutput, persistDecomposition, PlannerOutputError, type PersistedDecomposition } from "./decomposition.js";
 import { writeAgentLog } from "./logs.js";
 import { buildImplementerPrompt, buildPlannerPrompt, buildReviewerPrompt, type SkillContext, type SpecDocContext } from "./prompts.js";
@@ -84,7 +84,7 @@ export async function runImplementerAgent(card: Card, priorFailureNote?: string)
   // test runs — the agent reports success but never actually finishes. The
   // worktree is the real isolation boundary here (a physically separate
   // checkout the agent cwd is pinned to), so full autonomy inside it is safe.
-  const result = await runClaudeCli({ cwd: worktree.fsPath, prompt, permissionMode: "bypassPermissions" });
+  const result = await runClaudeCliStreamingOnce({ cwd: worktree.fsPath, agentRunId: run.id, prompt, permissionMode: "bypassPermissions" });
   const logsRef = await writeAgentLog(run.id, result.raw);
 
   await db
@@ -123,8 +123,9 @@ export async function runPlannerAgent(boardId: string, requestText: string): Pro
     .returning();
   if (!run) throw new Error("failed to insert agent_runs row");
 
-  const result = await runClaudeCli({
+  const result = await runClaudeCliStreamingOnce({
     cwd: resolveRepoRoot(),
+    agentRunId: run.id,
     prompt,
     permissionMode: "bypassPermissions",
     disallowedTools: ["Edit", "Write", "NotebookEdit", "Bash"],
@@ -175,8 +176,9 @@ export async function runReviewerAgent(card: Card): Promise<ReviewerRunResult> {
   // Read-only enforcement lives in disallowedTools, not permissionMode —
   // bypassPermissions still lets the reviewer run Bash (e.g. tests) inside
   // the worktree without a TTY to approve it, but it can never Edit/Write.
-  const result = await runClaudeCli({
+  const result = await runClaudeCliStreamingOnce({
     cwd: worktree.fsPath,
+    agentRunId: run.id,
     prompt,
     permissionMode: "bypassPermissions",
     disallowedTools: ["Edit", "Write", "NotebookEdit"],
