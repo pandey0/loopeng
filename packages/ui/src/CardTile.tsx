@@ -1,6 +1,7 @@
 import type { Card, CardWithStatus } from "@loopeng/shared";
 import { cn } from "./lib/utils";
 import { Badge } from "./components/badge";
+import { LiveIndicator } from "./components/live-indicator";
 import { getStatusMeta } from "./lib/status";
 
 const RISK_BORDER_CLASS: Record<Card["riskTier"], string> = {
@@ -70,6 +71,7 @@ export function CardTile({ card, draggable = true, highlighted = false, onDragSt
             <span className="relative inline-flex h-2 w-2 rounded-full bg-primary" />
           </span>
           {activeAgentRun?.roleName ?? "agent"} {activeAgentRun?.status}
+          {activeAgentRun?.live && <LiveIndicator className="ml-1" />}
         </div>
       )}
     </div>

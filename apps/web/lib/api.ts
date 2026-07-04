@@ -10,11 +10,15 @@ export interface CardDetailDocLink {
 
 export interface CardDetailAgentRun {
   id: string;
+  /** Set when this run was delegated by another run (sub-agent) — the Activity tab nests it under that parent. */
+  parentAgentRunId: string | null;
   roleName: string | null;
   status: string;
   verdict: string | null;
   startedAt: string | null;
   finishedAt: string | null;
+  /** True when the run has an attachable interactive session right now (card C's session registry). */
+  live: boolean;
 }
 
 export interface CardDetailGateResult {
@@ -161,6 +165,10 @@ export const api = {
     return request<ActivityEvent[]>(`/events${query ? `?${query}` : ""}`);
   },
   eventsStreamUrl: (boardId?: string) => `${API_URL}/events/stream${boardId ? `?boardId=${boardId}` : ""}`,
+  // WebSocket bridge onto an agent run (card C): live runs replay-then-stream
+  // and accept input; completed runs stream the persisted transcript and close.
+  agentRunSocketUrl: (agentRunId: string) =>
+    `${API_URL.replace(/^http/, "ws")}/agent-runs/${agentRunId}/socket`,
 
   getTemplate: (docType: "adr" | "rfc" | "skill") =>
     request<{ docType: string; content: string }>(`/docs/templates/${docType}`),
