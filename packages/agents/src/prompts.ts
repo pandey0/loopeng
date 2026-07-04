@@ -12,10 +12,38 @@ export interface SpecDocContext {
   body: string;
 }
 
+export interface AnsweredQuestionContext {
+  question: string;
+  answer: string;
+}
+
 function formatSpecDocsBlock(specDocs: SpecDocContext[]): string {
   return specDocs.length
     ? specDocs.map((d) => `### Spec: ${d.title}\n${d.body}`).join("\n\n")
     : "(no linked spec docs found)";
+}
+
+// Parallel to the reviewer's existing VERDICT: convention — documented in
+// every role's instructions so an agent that hits something only a human (or
+// later, a manager agent) can resolve escalates instead of guessing or
+// reporting failure.
+const QUESTION_CONVENTION = [
+  "If you are genuinely blocked on something only a human can resolve — an ambiguous requirement,",
+  "conflicting instructions, or a judgment call outside the acceptance criteria — do not guess and",
+  "do not report failure. Instead, end your entire turn with a line in this exact form, and nothing",
+  "else after it:",
+  "QUESTION: <your question>",
+  "This pauses the card for a human to answer; your question and their answer will be included in",
+  "your next dispatch. Only use this for genuine blockers, not to avoid making reasonable decisions.",
+].join("\n");
+
+function formatAnsweredQuestionsBlock(answeredQuestions: AnsweredQuestionContext[]): string[] {
+  if (answeredQuestions.length === 0) return [];
+  return [
+    "",
+    "## Previous questions & answers",
+    ...answeredQuestions.map((qa) => `Previously asked: ${qa.question}\nAnswer: ${qa.answer}`),
+  ];
 }
 
 export function buildImplementerPrompt(
@@ -23,6 +51,7 @@ export function buildImplementerPrompt(
   skills: SkillContext[],
   priorFailureNote?: string,
   specDocs: SpecDocContext[] = [],
+  answeredQuestions: AnsweredQuestionContext[] = [],
 ): string {
   const skillsBlock = skills.length
     ? skills.map((s) => `### Skill: ${s.title}\n${s.body}`).join("\n\n")
@@ -48,6 +77,7 @@ export function buildImplementerPrompt(
     "",
     "## Relevant skill docs",
     skillsBlock,
+    ...formatAnsweredQuestionsBlock(answeredQuestions),
     ...(priorFailureNote
       ? ["", "## Previous attempt feedback", "A prior attempt at this card was rejected. Address this before continuing:", priorFailureNote]
       : []),
@@ -56,6 +86,8 @@ export function buildImplementerPrompt(
     "Implement this card end-to-end: write the code, add/update tests, and run the test suite",
     "before finishing. When you are done, commit your changes on the current branch with a clear",
     "commit message. Do not push and do not touch files outside this worktree.",
+    "",
+    QUESTION_CONVENTION,
   ].join("\n");
 }
 

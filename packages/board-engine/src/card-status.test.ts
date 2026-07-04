@@ -5,6 +5,7 @@ import {
   type ActiveRunRow,
   type FailingGateRow,
   type FailingRunRow,
+  type OpenQuestionRow,
 } from "./card-status.js";
 
 describe("buildBlockedReasonMap", () => {
@@ -85,6 +86,40 @@ describe("buildBlockedReasonMap", () => {
     const result = buildBlockedReasonMap(["card-1", "card-2"], gateRows, []);
     expect(result.has("card-1")).toBe(false);
     expect(result.get("card-2")).toBe("tests_ci failed");
+  });
+
+  it("picks an open question when it is more recent than any failing gate or run", () => {
+    const gateRows: FailingGateRow[] = [
+      { cardId: "card-1", gateKey: "security_scan", createdAt: new Date("2026-01-01T00:00:00Z") },
+    ];
+    const questionRows: OpenQuestionRow[] = [
+      { cardId: "card-1", question: "which env should this deploy to?", createdAt: new Date("2026-01-02T00:00:00Z") },
+    ];
+
+    const result = buildBlockedReasonMap(["card-1"], gateRows, [], questionRows);
+    expect(result.get("card-1")).toBe("waiting on answer: which env should this deploy to?");
+  });
+
+  it("truncates a long open question", () => {
+    const longQuestion = "a".repeat(150);
+    const questionRows: OpenQuestionRow[] = [
+      { cardId: "card-1", question: longQuestion, createdAt: new Date("2026-01-01T00:00:00Z") },
+    ];
+
+    const result = buildBlockedReasonMap(["card-1"], [], [], questionRows);
+    expect(result.get("card-1")).toBe(`waiting on answer: ${"a".repeat(100)}…`);
+  });
+
+  it("ignores an open question that is older than a failing gate", () => {
+    const gateRows: FailingGateRow[] = [
+      { cardId: "card-1", gateKey: "security_scan", createdAt: new Date("2026-01-02T00:00:00Z") },
+    ];
+    const questionRows: OpenQuestionRow[] = [
+      { cardId: "card-1", question: "stale question", createdAt: new Date("2026-01-01T00:00:00Z") },
+    ];
+
+    const result = buildBlockedReasonMap(["card-1"], gateRows, [], questionRows);
+    expect(result.get("card-1")).toBe("security_scan failed");
   });
 });
 

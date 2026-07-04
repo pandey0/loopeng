@@ -84,3 +84,6 @@ export type DeployStatus = (typeof DEPLOY_STATUSES)[number];
 
 export const USER_ROLES = ["admin", "member", "viewer"] as const;
 export type UserRole = (typeof USER_ROLES)[number];
+
+export const CARD_QUESTION_STATUSES = ["open", "answered"] as const;
+export type CardQuestionStatus = (typeof CARD_QUESTION_STATUSES)[number];

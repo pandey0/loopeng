@@ -1,6 +1,6 @@
 import { eq } from "drizzle-orm";
 import { db } from "@loopeng/db";
-import { cards, eventLog, gateDefinitions, gateResults } from "@loopeng/db";
+import { cardQuestions, cards, eventLog, gateDefinitions, gateResults } from "@loopeng/db";
 import { applyTransition } from "@loopeng/board-engine";
 import { createWorktree, getActiveWorktree } from "@loopeng/worktree-manager";
 import { runImplementerAgent, runReviewerAgent } from "@loopeng/agents";
@@ -8,6 +8,10 @@ import { runGatePipeline } from "@loopeng/gates";
 import type { HookRegistry } from "./hooks.js";
 
 const MAX_ATTEMPTS = 3;
+
+// Kept short: card_questions.question stores the full text, this is only
+// the blockedReason-style summary carried on OrchestrateOutcome.
+const QUESTION_REASON_TRUNCATE_LENGTH = 200;
 
 export type OrchestrateOutcome =
   | { status: "awaiting_approval" }
@@ -61,6 +65,25 @@ export async function orchestrateCard(cardId: string, hooks: HookRegistry): Prom
     if (!currentCard) throw new Error(`card disappeared mid-run: ${cardId}`);
 
     const implResult = await runImplementerAgent(currentCard, priorFailureNote);
+
+    // A QUESTION: escalation ends the turn deliberately — it is neither a
+    // success nor a failure, so it must not consume one of the MAX_ATTEMPTS
+    // retries: the card pauses blocked until a human answers, then resumes
+    // to "ready" (event-trigger redispatches it) rather than retrying here.
+    if (implResult.question) {
+      const truncatedReason = implResult.question.slice(0, QUESTION_REASON_TRUNCATE_LENGTH);
+      await db.insert(cardQuestions).values({
+        cardId,
+        agentRunId: implResult.agentRunId,
+        roleName: "implementer",
+        question: implResult.question,
+        status: "open",
+        routedTo: "product_owner",
+      });
+      await applyTransition({ cardId, toState: "blocked", actorType: "agent" });
+      return { status: "blocked", reason: `waiting on answer: ${truncatedReason}` };
+    }
+
     if (implResult.isError) {
       if (attempt < MAX_ATTEMPTS) {
         priorFailureNote = `Implementer run failed: ${implResult.resultText.slice(0, 2000)}`;

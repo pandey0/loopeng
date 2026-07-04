@@ -38,6 +38,20 @@ export interface CardDetailEvent {
   createdAt: string;
 }
 
+export interface CardDetailQuestion {
+  id: string;
+  cardId: string;
+  agentRunId: string | null;
+  roleName: string;
+  question: string;
+  status: "open" | "answered";
+  routedTo: string;
+  answer: string | null;
+  answeredBy: string | null;
+  createdAt: string;
+  answeredAt: string | null;
+}
+
 export interface ActivityEvent {
   id: number;
   entityType: string;
@@ -63,6 +77,7 @@ export interface CardDetail extends Card {
   agentRuns: CardDetailAgentRun[];
   gateResults: CardDetailGateResult[];
   events: CardDetailEvent[];
+  questions: CardDetailQuestion[];
 }
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
@@ -155,6 +170,11 @@ export const api = {
     request(`/cards/${id}/doc-links`, {
       method: "POST",
       body: JSON.stringify({ docId, linkType }),
+    }),
+  answerCardQuestion: (cardId: string, questionId: string, answer: string, answeredBy?: string) =>
+    request<CardDetailQuestion>(`/cards/${cardId}/questions/${questionId}/answer`, {
+      method: "POST",
+      body: JSON.stringify({ answer, ...(answeredBy ? { answeredBy } : {}) }),
     }),
 
   listEvents: (params?: { boardId?: string; limit?: number }) => {

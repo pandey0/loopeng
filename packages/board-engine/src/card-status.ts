@@ -1,21 +1,30 @@
 import { and, desc, eq, inArray } from "drizzle-orm";
 import { db } from "@loopeng/db";
-import { agentRoles, agentRuns, gateDefinitions, gateResults } from "@loopeng/db";
+import { agentRoles, agentRuns, cardQuestions, gateDefinitions, gateResults } from "@loopeng/db";
 import type { CardActiveRun, CardWithStatus } from "@loopeng/shared";
 
 export type { CardActiveRun, CardWithStatus };
 
 const ACTIVE_STATUSES = ["running", "verifying"] as const;
 
+// Kept short so the one-line blockedReason badge (CardTile) doesn't overflow.
+const QUESTION_TRUNCATE_LENGTH = 100;
+
+function truncateQuestion(question: string): string {
+  return question.length > QUESTION_TRUNCATE_LENGTH
+    ? `${question.slice(0, QUESTION_TRUNCATE_LENGTH).trimEnd()}…`
+    : question;
+}
+
 // Diagnoses *why* a blocked card is blocked without a human opening card
-// detail and reading raw gate_results/agent_runs rows — picks whichever of
-// (latest failing gate, latest failed/rejected agent run) happened most
-// recently, since either can be the actual cause depending on where the
-// pipeline stopped.
+// detail and reading raw gate_results/agent_runs/card_questions rows — picks
+// whichever of (latest failing gate, latest failed/rejected agent run,
+// latest open question) happened most recently, since any of the three can
+// be the actual cause depending on where the pipeline stopped.
 async function computeBlockedReasons(cardIds: string[]): Promise<Map<string, string>> {
   if (cardIds.length === 0) return new Map();
 
-  const [failingGates, candidateRuns] = await Promise.all([
+  const [failingGates, candidateRuns, openQuestions] = await Promise.all([
     db
       .select({
         cardId: gateResults.cardId,
@@ -39,9 +48,18 @@ async function computeBlockedReasons(cardIds: string[]): Promise<Map<string, str
       .leftJoin(agentRoles, eq(agentRuns.agentRoleId, agentRoles.id))
       .where(inArray(agentRuns.cardId, cardIds))
       .orderBy(desc(agentRuns.finishedAt)),
+    db
+      .select({
+        cardId: cardQuestions.cardId,
+        question: cardQuestions.question,
+        createdAt: cardQuestions.createdAt,
+      })
+      .from(cardQuestions)
+      .where(and(inArray(cardQuestions.cardId, cardIds), eq(cardQuestions.status, "open")))
+      .orderBy(desc(cardQuestions.createdAt)),
   ]);
 
-  return buildBlockedReasonMap(cardIds, failingGates, candidateRuns);
+  return buildBlockedReasonMap(cardIds, failingGates, candidateRuns, openQuestions);
 }
 
 export interface FailingGateRow {
@@ -59,12 +77,20 @@ export interface FailingRunRow {
   finishedAt: Date | null;
 }
 
+export interface OpenQuestionRow {
+  cardId: string | null;
+  question: string;
+  createdAt: Date;
+}
+
 // Pure so it's unit-testable without a database: picks, per card, whichever
-// of (latest failing gate, latest failed/rejected agent run) is more recent.
+// of (latest failing gate, latest failed/rejected agent run, latest open
+// question) is more recent.
 export function buildBlockedReasonMap(
   cardIds: string[],
   gateRows: FailingGateRow[],
   runRows: FailingRunRow[],
+  questionRows: OpenQuestionRow[] = [],
 ): Map<string, string> {
   const result = new Map<string, string>();
 
@@ -90,6 +116,14 @@ export function buildBlockedReasonMap(
         bestAt = at;
         const role = row.roleName ?? "agent";
         bestReason = row.verdict === "fail" ? `${role} rejected` : `${role} failed`;
+      }
+    }
+
+    for (const row of questionRows) {
+      if (row.cardId !== cardId) continue;
+      if (!bestAt || row.createdAt > bestAt) {
+        bestAt = row.createdAt;
+        bestReason = `waiting on answer: ${truncateQuestion(row.question)}`;
       }
     }
 

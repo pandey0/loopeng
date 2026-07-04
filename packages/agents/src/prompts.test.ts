@@ -50,6 +50,25 @@ describe("buildImplementerPrompt", () => {
     expect(prompt).toContain("### Spec: Auth Spec");
     expect(prompt).toContain("All requests must be authenticated.");
   });
+
+  it("documents the QUESTION: escalation convention", () => {
+    const prompt = buildImplementerPrompt(card(), []);
+    expect(prompt).toContain("QUESTION: <your question>");
+  });
+
+  it("omits the Q&A section when there are no answered questions", () => {
+    const prompt = buildImplementerPrompt(card(), []);
+    expect(prompt).not.toContain("## Previous questions & answers");
+  });
+
+  it("injects previously answered questions into the prompt", () => {
+    const prompt = buildImplementerPrompt(card(), [], undefined, [], [
+      { question: "should sessions expire after 1h or 24h?", answer: "24h" },
+    ]);
+    expect(prompt).toContain("## Previous questions & answers");
+    expect(prompt).toContain("Previously asked: should sessions expire after 1h or 24h?");
+    expect(prompt).toContain("Answer: 24h");
+  });
 });
 
 describe("buildPlannerPrompt", () => {
