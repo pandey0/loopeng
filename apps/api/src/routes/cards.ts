@@ -1,6 +1,7 @@
 import type { FastifyPluginAsync } from "fastify";
 import { and, desc, eq } from "drizzle-orm";
 import { applyTransition, attachCardStatus, wouldCreateCycle } from "@loopeng/board-engine";
+import { sessionRegistry } from "@loopeng/agents";
 import {
   agentRoles,
   agentRuns,
@@ -20,13 +21,17 @@ import {
   CardDocLinkSchema,
 } from "@loopeng/shared";
 
+// "live" = card C's in-process registry has an attachable streaming session
+// for this run right now, i.e. a WebSocket client could connect and steer it.
+const isRunLive = (agentRunId: string): boolean => sessionRegistry.get(agentRunId) !== undefined;
+
 export const cardRoutes: FastifyPluginAsync = async (fastify) => {
   fastify.get("/cards", async (request) => {
     const { boardId } = request.query as { boardId?: string };
     const cardRows = boardId
       ? await fastify.db.select().from(cards).where(eq(cards.boardId, boardId))
       : await fastify.db.select().from(cards);
-    return attachCardStatus(cardRows);
+    return attachCardStatus(cardRows, { isRunLive });
   });
 
   fastify.post("/cards", async (request, reply) => {
@@ -84,6 +89,7 @@ export const cardRoutes: FastifyPluginAsync = async (fastify) => {
       fastify.db
         .select({
           id: agentRuns.id,
+          parentAgentRunId: agentRuns.parentAgentRunId,
           roleName: agentRoles.name,
           status: agentRuns.status,
           verdict: agentRuns.verdict,
@@ -119,7 +125,7 @@ export const cardRoutes: FastifyPluginAsync = async (fastify) => {
       dependsOn,
       dependents,
       linkedDocs,
-      agentRuns: agentRunRows,
+      agentRuns: agentRunRows.map((run) => ({ ...run, live: isRunLive(run.id) })),
       gateResults: gateResultRows,
       events,
     };

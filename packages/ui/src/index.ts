@@ -5,6 +5,8 @@ export * from "./AdrForm";
 
 export * from "./lib/utils";
 export * from "./lib/status";
+export * from "./lib/agent-run-tree";
+export * from "./lib/agent-transcript";
 export * from "./components/button";
 export * from "./components/badge";
 export * from "./components/status-badge";
@@ -17,3 +19,4 @@ export * from "./components/toast";
 export * from "./components/notification-bell";
 export * from "./components/dialog";
 export * from "./components/tabs";
+export * from "./components/live-indicator";

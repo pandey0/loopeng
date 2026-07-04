@@ -100,29 +100,44 @@ export function buildBlockedReasonMap(
 }
 
 export interface ActiveRunRow {
+  id: string;
   cardId: string | null;
   roleName: string | null;
   status: string;
   startedAt: Date | null;
 }
 
+/**
+ * Answers "does this agent run have a live interactive session right now?".
+ * Injected (rather than imported from @loopeng/agents) so board-engine stays
+ * free of a dependency on the agent-process layer; the API passes card C's
+ * sessionRegistry through.
+ */
+export type IsRunLive = (agentRunId: string) => boolean;
+
 // Pure: rows must already be sorted by startedAt DESC, so the first
 // running/verifying row seen per card is the most recent one.
-export function buildActiveAgentRunMap(rows: ActiveRunRow[]): Map<string, CardActiveRun> {
+export function buildActiveAgentRunMap(rows: ActiveRunRow[], isRunLive?: IsRunLive): Map<string, CardActiveRun> {
   const result = new Map<string, CardActiveRun>();
   for (const row of rows) {
     if (!row.cardId || result.has(row.cardId)) continue;
     if (!ACTIVE_STATUSES.includes(row.status as (typeof ACTIVE_STATUSES)[number])) continue;
-    result.set(row.cardId, { roleName: row.roleName, status: row.status as CardActiveRun["status"] });
+    result.set(row.cardId, {
+      agentRunId: row.id,
+      roleName: row.roleName,
+      status: row.status as CardActiveRun["status"],
+      live: isRunLive?.(row.id) ?? false,
+    });
   }
   return result;
 }
 
-async function computeActiveAgentRuns(cardIds: string[]): Promise<Map<string, CardActiveRun>> {
+async function computeActiveAgentRuns(cardIds: string[], isRunLive?: IsRunLive): Promise<Map<string, CardActiveRun>> {
   if (cardIds.length === 0) return new Map();
 
   const rows = await db
     .select({
+      id: agentRuns.id,
       cardId: agentRuns.cardId,
       roleName: agentRoles.name,
       status: agentRuns.status,
@@ -133,7 +148,7 @@ async function computeActiveAgentRuns(cardIds: string[]): Promise<Map<string, Ca
     .where(inArray(agentRuns.cardId, cardIds))
     .orderBy(desc(agentRuns.startedAt));
 
-  return buildActiveAgentRunMap(rows);
+  return buildActiveAgentRunMap(rows, isRunLive);
 }
 
 /**
@@ -149,6 +164,7 @@ async function computeActiveAgentRuns(cardIds: string[]): Promise<Map<string, Ca
  */
 export async function attachCardStatus<T extends { id: string; state: string }>(
   cardRows: T[],
+  options?: { isRunLive?: IsRunLive },
 ): Promise<(T & Pick<CardWithStatus, "blockedReason" | "activeAgentRun">)[]> {
   const blockedCardIds = cardRows.filter((c) => c.state === "blocked").map((c) => c.id);
   const activeCandidateIds = cardRows
@@ -157,7 +173,7 @@ export async function attachCardStatus<T extends { id: string; state: string }>(
 
   const [blockedReasons, activeRuns] = await Promise.all([
     computeBlockedReasons(blockedCardIds),
-    computeActiveAgentRuns(activeCandidateIds),
+    computeActiveAgentRuns(activeCandidateIds, options?.isRunLive),
   ]);
 
   return cardRows.map((card) => ({

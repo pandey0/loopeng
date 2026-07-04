@@ -140,8 +140,16 @@ export type CardUpdateInput = z.infer<typeof CardUpdateInputSchema>;
 // nothing ever needs to parse/validate these off the wire independently of
 // the Card they're attached to.
 export interface CardActiveRun {
+  agentRunId: string;
   roleName: string | null;
   status: "running" | "verifying";
+  /**
+   * True when the run has a live interactive session attached (card C's
+   * in-process session registry), i.e. a WebSocket can connect and steer it
+   * right now — stricter than status === "running", which is DB-derived and
+   * survives process restarts.
+   */
+  live: boolean;
 }
 
 export interface CardWithStatus extends Card {

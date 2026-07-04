@@ -6,7 +6,9 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Badge,
   Button,
+  Dialog,
   Input,
+  LiveIndicator,
   StatusBadge,
   Table,
   TableHeader,
@@ -15,8 +17,11 @@ import {
   TableHead,
   TableCell,
   Tabs,
+  buildAgentRunTree,
+  flattenAgentRunTree,
 } from "@loopeng/ui";
-import { api } from "../../../lib/api";
+import { api, type CardDetailAgentRun } from "../../../lib/api";
+import { AgentSessionPanel } from "./AgentSessionPanel";
 
 interface TimelineRow {
   at: Date;
@@ -33,6 +38,7 @@ export default function CardDetailPage({ params }: { params: Promise<{ cardId: s
   const [criteria, setCriteria] = useState<string[]>([]);
   const [newCriterion, setNewCriterion] = useState("");
   const [saving, setSaving] = useState(false);
+  const [sessionRun, setSessionRun] = useState<CardDetailAgentRun | null>(null);
 
   useEffect(() => {
     if (detailQuery.data) setCriteria(detailQuery.data.acceptanceCriteria);
@@ -73,6 +79,13 @@ export default function CardDetailPage({ params }: { params: Promise<{ cardId: s
 
     return rows.sort((a, b) => b.at.getTime() - a.at.getTime());
   }, [detailQuery.data]);
+
+  // Delegation tree: sub-agent runs (non-null parentAgentRunId) nest under
+  // the run that spawned them, in startedAt order within each level.
+  const agentRunRows = useMemo(
+    () => flattenAgentRunTree(buildAgentRunTree(detailQuery.data?.agentRuns ?? [])),
+    [detailQuery.data],
+  );
 
   if (detailQuery.isLoading) return <p>Loading...</p>;
   if (!detailQuery.data) return <p>Not found.</p>;
@@ -226,16 +239,33 @@ export default function CardDetailPage({ params }: { params: Promise<{ cardId: s
               <TableHead>Verdict</TableHead>
               <TableHead>Started</TableHead>
               <TableHead>Finished</TableHead>
+              <TableHead>Session</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
-            {card.agentRuns.map((run) => (
+            {agentRunRows.map(({ run, depth }) => (
               <TableRow key={run.id}>
-                <TableCell>{run.roleName ?? "—"}</TableCell>
+                <TableCell>
+                  <span className="flex items-center gap-1.5" style={{ paddingLeft: `${depth * 16}px` }}>
+                    {depth > 0 && <span className="text-muted-foreground">└</span>}
+                    {run.roleName ?? "—"}
+                    {depth > 0 && (
+                      <Badge variant="outline" className="px-1 py-0 text-[10px]">
+                        sub-agent
+                      </Badge>
+                    )}
+                    {run.live && <LiveIndicator label={null} />}
+                  </span>
+                </TableCell>
                 <TableCell>{run.status}</TableCell>
                 <TableCell>{run.verdict ?? "—"}</TableCell>
                 <TableCell>{run.startedAt ? new Date(run.startedAt).toLocaleString() : "—"}</TableCell>
                 <TableCell>{run.finishedAt ? new Date(run.finishedAt).toLocaleString() : "—"}</TableCell>
+                <TableCell>
+                  <Button variant="ghost" size="sm" className="h-auto px-1.5 py-0.5 text-[11px]" onClick={() => setSessionRun(run)}>
+                    View session
+                  </Button>
+                </TableCell>
               </TableRow>
             ))}
           </TableBody>
@@ -289,6 +319,18 @@ export default function CardDetailPage({ params }: { params: Promise<{ cardId: s
           { value: "activity", label: "Activity", content: activity },
         ]}
       />
+
+      {sessionRun && (
+        <Dialog
+          open
+          onClose={() => setSessionRun(null)}
+          title={`Agent session — ${sessionRun.roleName ?? "agent"}`}
+          description={sessionRun.live ? "Live session: new events stream in and you can send messages." : "Completed run: read-only transcript playback."}
+          className="max-w-2xl"
+        >
+          <AgentSessionPanel agentRunId={sessionRun.id} roleName={sessionRun.roleName} live={sessionRun.live} />
+        </Dialog>
+      )}
     </div>
   );
 }

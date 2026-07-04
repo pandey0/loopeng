@@ -91,17 +91,17 @@ describe("buildBlockedReasonMap", () => {
 describe("buildActiveAgentRunMap", () => {
   it("returns the most recent running/verifying run per card, given rows sorted startedAt DESC", () => {
     const rows: ActiveRunRow[] = [
-      { cardId: "card-1", roleName: "reviewer", status: "verifying", startedAt: new Date("2026-01-02T00:00:00Z") },
-      { cardId: "card-1", roleName: "implementer", status: "running", startedAt: new Date("2026-01-01T00:00:00Z") },
+      { id: "run-2", cardId: "card-1", roleName: "reviewer", status: "verifying", startedAt: new Date("2026-01-02T00:00:00Z") },
+      { id: "run-1", cardId: "card-1", roleName: "implementer", status: "running", startedAt: new Date("2026-01-01T00:00:00Z") },
     ];
 
     const result = buildActiveAgentRunMap(rows);
-    expect(result.get("card-1")).toEqual({ roleName: "reviewer", status: "verifying" });
+    expect(result.get("card-1")).toEqual({ agentRunId: "run-2", roleName: "reviewer", status: "verifying", live: false });
   });
 
   it("excludes cards whose most recent run already finished", () => {
     const rows: ActiveRunRow[] = [
-      { cardId: "card-1", roleName: "implementer", status: "succeeded", startedAt: new Date("2026-01-01T00:00:00Z") },
+      { id: "run-1", cardId: "card-1", roleName: "implementer", status: "succeeded", startedAt: new Date("2026-01-01T00:00:00Z") },
     ];
 
     const result = buildActiveAgentRunMap(rows);
@@ -109,8 +109,18 @@ describe("buildActiveAgentRunMap", () => {
   });
 
   it("defaults a null role name through unchanged", () => {
-    const rows: ActiveRunRow[] = [{ cardId: "card-1", roleName: null, status: "running", startedAt: new Date() }];
+    const rows: ActiveRunRow[] = [{ id: "run-1", cardId: "card-1", roleName: null, status: "running", startedAt: new Date() }];
     const result = buildActiveAgentRunMap(rows);
-    expect(result.get("card-1")).toEqual({ roleName: null, status: "running" });
+    expect(result.get("card-1")).toEqual({ agentRunId: "run-1", roleName: null, status: "running", live: false });
+  });
+
+  it("marks a run live when the injected registry check recognizes its id", () => {
+    const rows: ActiveRunRow[] = [
+      { id: "run-live", cardId: "card-1", roleName: "implementer", status: "running", startedAt: new Date() },
+      { id: "run-dead", cardId: "card-2", roleName: "reviewer", status: "running", startedAt: new Date() },
+    ];
+    const result = buildActiveAgentRunMap(rows, (id) => id === "run-live");
+    expect(result.get("card-1")?.live).toBe(true);
+    expect(result.get("card-2")?.live).toBe(false);
   });
 });
