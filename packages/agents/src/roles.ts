@@ -1,18 +1,27 @@
 import { and, desc, eq } from "drizzle-orm";
 import { db } from "@loopeng/db";
-import { agentRoles, agentRuns, cardDocLinks, cardQuestions, cards, docs as docsTable } from "@loopeng/db";
+import { agentRoles, agentRuns, cardDependencies, cardDocLinks, cardQuestions, cards, docs as docsTable } from "@loopeng/db";
 import { getDoc, listDocs } from "@loopeng/doc-engine";
 
 type Card = typeof cards.$inferSelect;
 import { getActiveWorktree, getRepoDiff, resolveRepoRoot } from "@loopeng/worktree-manager";
 import { runClaudeCliStreamingOnce } from "./claude-cli.js";
-import { parsePlannerOutput, persistDecomposition, PlannerOutputError, type PersistedDecomposition } from "./decomposition.js";
+import {
+  parsePlannerOutput,
+  persistDecomposition,
+  persistManagerDecomposition,
+  PlannerOutputError,
+  type PersistedDecomposition,
+  type PersistedManagerDecomposition,
+} from "./decomposition.js";
 import { writeAgentLog } from "./logs.js";
 import {
   buildImplementerPrompt,
+  buildManagerPrompt,
   buildPlannerPrompt,
   buildReviewerPrompt,
   type AnsweredQuestionContext,
+  type ManagerChildCardContext,
   type SkillContext,
   type SpecDocContext,
 } from "./prompts.js";
@@ -205,6 +214,94 @@ export async function runPlannerAgent(boardId: string, requestText: string): Pro
   try {
     const parsed = parsePlannerOutput(result.resultText);
     persisted = await persistDecomposition(boardId, parsed);
+  } catch (err) {
+    await db.update(agentRuns).set({ status: "failed", logsRef, finishedAt: new Date() }).where(eq(agentRuns.id, run.id));
+    throw err;
+  }
+
+  await db.update(agentRuns).set({ status: "succeeded", logsRef, finishedAt: new Date() }).where(eq(agentRuns.id, run.id));
+
+  return {
+    agentRunId: run.id,
+    isError: false,
+    resultText: result.resultText,
+    costUsd: result.totalCostUsd,
+    logsRef,
+    ...persisted,
+  };
+}
+
+export interface ManagerRunResult extends AgentRunResult, PersistedManagerDecomposition {}
+
+// Reviews a freshly-decomposed epic's child cards and may adjust the
+// breakdown (spec: org-chart-manager-agent-role). Runs once, right after
+// intake creates the epic — not a persistent standing process. Like the
+// planner, it has no card-scoped worktree; it runs read-only against the
+// main repo checkout and its entire output is the two fenced blocks
+// parsePlannerOutput expects, scoped to this one epic instead of a fresh
+// intake request.
+export async function runManagerAgent(epicCardId: string): Promise<ManagerRunResult> {
+  const [epicCard] = await db.select().from(cards).where(eq(cards.id, epicCardId));
+  if (!epicCard) throw new Error(`epic card not found: ${epicCardId}`);
+  if (epicCard.cardType !== "epic") {
+    throw new Error(`card ${epicCardId} is not an epic (cardType=${epicCard.cardType})`);
+  }
+
+  const roleId = await getRoleId("tech-manager");
+
+  const childRows = await db
+    .select({ card: cards })
+    .from(cardDependencies)
+    .innerJoin(cards, eq(cardDependencies.cardId, cards.id))
+    .where(and(eq(cardDependencies.dependsOnCardId, epicCardId), eq(cardDependencies.dependencyType, "relates_to")));
+  const childCards: ManagerChildCardContext[] = childRows.map(({ card }, i) => ({
+    key: `child-${i}`,
+    title: card.title,
+    description: card.description,
+    cardType: card.cardType,
+    riskTier: card.riskTier,
+    priority: card.priority,
+    tags: card.tags,
+    acceptanceCriteria: card.acceptanceCriteria,
+  }));
+
+  const specDocs = await loadLinkedSpecDocs(epicCard);
+  const prompt = buildManagerPrompt(epicCard, childCards, specDocs);
+
+  const [run] = await db
+    .insert(agentRuns)
+    .values({ cardId: epicCardId, agentRoleId: roleId, status: "running", startedAt: new Date() })
+    .returning();
+  if (!run) throw new Error("failed to insert agent_runs row");
+
+  const managerDisallowedTools = ["Edit", "Write", "NotebookEdit", "Bash"];
+  const mcpConfig = buildSubAgentMcpConfig({
+    parentAgentRunId: run.id,
+    cardId: epicCardId,
+    worktreeId: null,
+    cwd: resolveRepoRoot(),
+    depth: 1,
+    disallowedTools: managerDisallowedTools,
+  });
+  const result = await runClaudeCliStreamingOnce({
+    cwd: resolveRepoRoot(),
+    agentRunId: run.id,
+    prompt,
+    permissionMode: "bypassPermissions",
+    disallowedTools: managerDisallowedTools,
+    mcpConfig,
+  });
+  const logsRef = await writeAgentLog(run.id, result.raw);
+
+  if (result.isError) {
+    await db.update(agentRuns).set({ status: "failed", logsRef, finishedAt: new Date() }).where(eq(agentRuns.id, run.id));
+    throw new PlannerOutputError(`manager agent run failed: ${result.resultText.slice(0, 2000)}`);
+  }
+
+  let persisted: PersistedManagerDecomposition;
+  try {
+    const parsed = parsePlannerOutput(result.resultText);
+    persisted = await persistManagerDecomposition(epicCardId, parsed);
   } catch (err) {
     await db.update(agentRuns).set({ status: "failed", logsRef, finishedAt: new Date() }).where(eq(agentRuns.id, run.id));
     throw err;

@@ -1,3 +1,4 @@
+import { and, eq, inArray } from "drizzle-orm";
 import { z } from "zod";
 import { cardDependencies, cardDocLinks, cards, db } from "@loopeng/db";
 import { createDoc } from "@loopeng/doc-engine";
@@ -146,6 +147,52 @@ export interface PersistedDecomposition {
   specDocId: string;
 }
 
+// Shared by persistDecomposition (fresh intake, mints a new epic) and
+// persistManagerDecomposition (epic review, reuses an existing epic): both
+// write one card per decomposition entry, spec-linked to the given doc,
+// related to the given epic, and blocked on its declared dependsOn keys.
+async function insertChildCards(
+  boardId: string,
+  epicCardId: string,
+  specDocId: string,
+  cardsSpec: PlannerCardSpec[],
+): Promise<string[]> {
+  const idByKey = new Map<string, string>();
+  for (const spec of cardsSpec) {
+    const [card] = await db
+      .insert(cards)
+      .values({
+        boardId,
+        title: spec.title,
+        description: spec.description,
+        cardType: spec.cardType,
+        riskTier: spec.riskTier,
+        priority: spec.priority,
+        tags: spec.tags,
+        acceptanceCriteria: spec.acceptanceCriteria,
+      })
+      .returning();
+    if (!card) throw new PlannerOutputError(`failed to insert card for key "${spec.key}"`);
+    idByKey.set(spec.key, card.id);
+
+    await db.insert(cardDocLinks).values({ cardId: card.id, docId: specDocId, linkType: "spec" });
+    await db.insert(cardDependencies).values({ cardId: card.id, dependsOnCardId: epicCardId, dependencyType: "relates_to" });
+  }
+
+  for (const spec of cardsSpec) {
+    const cardId = idByKey.get(spec.key)!;
+    for (const dep of spec.dependsOn) {
+      await db.insert(cardDependencies).values({
+        cardId,
+        dependsOnCardId: idByKey.get(dep)!,
+        dependencyType: "blocks",
+      });
+    }
+  }
+
+  return cardsSpec.map((spec) => idByKey.get(spec.key)!);
+}
+
 // Writes a validated planner decomposition to the board: one spec doc (the
 // markdown block, committed through doc-engine so it gets the same
 // git-backed history as a human-authored doc), one epic card, and one card
@@ -187,40 +234,54 @@ export async function persistDecomposition(
 
   await db.insert(cardDocLinks).values({ cardId: epicCard.id, docId: specDoc.id, linkType: "spec" });
 
-  const idByKey = new Map<string, string>();
-  for (const spec of decomposition.cards) {
-    const [card] = await db
-      .insert(cards)
-      .values({
-        boardId,
-        title: spec.title,
-        description: spec.description,
-        cardType: spec.cardType,
-        riskTier: spec.riskTier,
-        priority: spec.priority,
-        tags: spec.tags,
-        acceptanceCriteria: spec.acceptanceCriteria,
-      })
-      .returning();
-    if (!card) throw new PlannerOutputError(`failed to insert card for key "${spec.key}"`);
-    idByKey.set(spec.key, card.id);
-
-    await db.insert(cardDocLinks).values({ cardId: card.id, docId: specDoc.id, linkType: "spec" });
-    await db.insert(cardDependencies).values({ cardId: card.id, dependsOnCardId: epicCard.id, dependencyType: "relates_to" });
-  }
-
-  for (const spec of decomposition.cards) {
-    const cardId = idByKey.get(spec.key)!;
-    for (const dep of spec.dependsOn) {
-      await db.insert(cardDependencies).values({
-        cardId,
-        dependsOnCardId: idByKey.get(dep)!,
-        dependencyType: "blocks",
-      });
-    }
-  }
-
-  const cardIds = decomposition.cards.map((spec) => idByKey.get(spec.key)!);
+  const cardIds = await insertChildCards(boardId, epicCard.id, specDoc.id, decomposition.cards);
 
   return { epicCardId: epicCard.id, cardIds, specDocId: specDoc.id };
+}
+
+export interface PersistedManagerDecomposition {
+  epicCardId: string;
+  cardIds: string[];
+  removedCardIds: string[];
+}
+
+// A manager agent reviews an *existing* epic's child cards and may adjust
+// the breakdown (split/merge/reprioritize) — same per-card insert mechanics
+// as persistDecomposition (insertChildCards), but scoped to the given epic
+// instead of minting a new one: the epic's current children are replaced
+// (cascade-deletes their doc links and dependency edges) rather than
+// appended to, and the epic's own spec doc/card row are reused, not
+// recreated.
+export async function persistManagerDecomposition(
+  epicCardId: string,
+  parsed: ParsedPlannerOutput,
+): Promise<PersistedManagerDecomposition> {
+  const [epicCard] = await db.select().from(cards).where(eq(cards.id, epicCardId));
+  if (!epicCard) throw new PlannerOutputError(`epic card not found: ${epicCardId}`);
+  if (epicCard.cardType !== "epic") {
+    throw new PlannerOutputError(`card ${epicCardId} is not an epic (cardType=${epicCard.cardType})`);
+  }
+
+  const [specLink] = await db
+    .select()
+    .from(cardDocLinks)
+    .where(and(eq(cardDocLinks.cardId, epicCardId), eq(cardDocLinks.linkType, "spec")));
+  if (!specLink) throw new PlannerOutputError(`epic card ${epicCardId} has no linked spec doc`);
+
+  const existingChildEdges = await db
+    .select()
+    .from(cardDependencies)
+    .where(and(eq(cardDependencies.dependsOnCardId, epicCardId), eq(cardDependencies.dependencyType, "relates_to")));
+  const removedCardIds = existingChildEdges.map((edge) => edge.cardId);
+  if (removedCardIds.length > 0) {
+    await db.delete(cards).where(inArray(cards.id, removedCardIds));
+  }
+
+  const { decomposition } = parsed;
+  const epicRiskTier = computeEpicRiskTier(decomposition.cards);
+  await db.update(cards).set({ riskTier: epicRiskTier, updatedAt: new Date() }).where(eq(cards.id, epicCardId));
+
+  const cardIds = await insertChildCards(epicCard.boardId, epicCardId, specLink.docId, decomposition.cards);
+
+  return { epicCardId, cardIds, removedCardIds };
 }

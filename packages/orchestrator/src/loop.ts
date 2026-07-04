@@ -3,7 +3,7 @@ import { db } from "@loopeng/db";
 import { cardQuestions, cards, eventLog, gateDefinitions, gateResults } from "@loopeng/db";
 import { applyTransition } from "@loopeng/board-engine";
 import { createWorktree, getActiveWorktree } from "@loopeng/worktree-manager";
-import { runImplementerAgent, runReviewerAgent } from "@loopeng/agents";
+import { resolveQuestionRouting, runImplementerAgent, runReviewerAgent } from "@loopeng/agents";
 import { runGatePipeline } from "@loopeng/gates";
 import type { HookRegistry } from "./hooks.js";
 
@@ -72,13 +72,28 @@ export async function orchestrateCard(cardId: string, hooks: HookRegistry): Prom
     // to "ready" (event-trigger redispatches it) rather than retrying here.
     if (implResult.question) {
       const truncatedReason = implResult.question.slice(0, QUESTION_REASON_TRUNCATE_LENGTH);
+      const routedTo = await resolveQuestionRouting(cardId);
       await db.insert(cardQuestions).values({
         cardId,
         agentRunId: implResult.agentRunId,
         roleName: "implementer",
         question: implResult.question,
         status: "open",
-        routedTo: "product_owner",
+        routedTo,
+      });
+      // Notification framing depends on who it's routed to (spec:
+      // org-chart-manager-agent-role) — a manager-reviewed epic's cards get
+      // a manager-drafted framing instead of the raw agent question, since
+      // the manager (not the product owner) is the first line of triage.
+      await db.insert(eventLog).values({
+        entityType: "card",
+        entityId: cardId,
+        eventType: "card.question_raised",
+        actorType: "agent",
+        payload: {
+          routedTo,
+          message: routedTo === "tech-manager" ? `Manager review needed: ${implResult.question}` : implResult.question,
+        },
       });
       await applyTransition({ cardId, toState: "blocked", actorType: "agent" });
       return { status: "blocked", reason: `waiting on answer: ${truncatedReason}` };

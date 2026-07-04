@@ -1,7 +1,7 @@
 import type { FastifyPluginAsync } from "fastify";
 import { eq } from "drizzle-orm";
 import { boards, eventLog } from "@loopeng/db";
-import { PlannerOutputError, runPlannerAgent } from "@loopeng/agents";
+import { PlannerOutputError, runManagerAgent, runPlannerAgent } from "@loopeng/agents";
 import { IntakeInputSchema } from "@loopeng/shared";
 
 // Replaces a human manually writing a spec doc + cards: a product owner
@@ -32,7 +32,22 @@ export const intakeRoutes: FastifyPluginAsync = async (fastify) => {
         actorId: input.requestedById ?? null,
         payload: { agentRunId: result.agentRunId, cardIds: result.cardIds, specDocId: result.specDocId },
       });
-      reply.status(201).send(result);
+
+      // Every fresh epic gets a one-time tech-manager review before its
+      // cards are left for a human to move to "ready" (spec:
+      // org-chart-manager-agent-role) — it may adjust the breakdown
+      // (split/merge/reprioritize), which is why cardIds below can differ
+      // from the planner's original result.cardIds.
+      const managerResult = await runManagerAgent(result.epicCardId);
+      await fastify.db.insert(eventLog).values({
+        entityType: "card",
+        entityId: result.epicCardId,
+        eventType: "card.epic_reviewed",
+        actorType: "agent",
+        payload: { agentRunId: managerResult.agentRunId, cardIds: managerResult.cardIds, removedCardIds: managerResult.removedCardIds },
+      });
+
+      reply.status(201).send({ ...result, cardIds: managerResult.cardIds, managerAgentRunId: managerResult.agentRunId });
     } catch (err) {
       if (err instanceof PlannerOutputError) {
         reply.status(422).send({ error: "planner_output_invalid", message: err.message });

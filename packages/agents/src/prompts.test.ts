@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { cards } from "@loopeng/db";
-import { buildImplementerPrompt, buildPlannerPrompt, buildReviewerPrompt } from "./prompts";
+import { buildImplementerPrompt, buildManagerPrompt, buildPlannerPrompt, buildReviewerPrompt } from "./prompts";
 
 type Card = typeof cards.$inferSelect;
 
@@ -89,6 +89,53 @@ describe("buildPlannerPrompt", () => {
   it("notes when there are no existing cards", () => {
     const prompt = buildPlannerPrompt("Add SSO login", []);
     expect(prompt).toContain("(none)");
+  });
+});
+
+describe("buildManagerPrompt", () => {
+  const epic = card({ id: "epic-1", cardType: "epic", title: "Widget rollout", description: "Ship the widget end to end." });
+
+  it("lists the epic and its current child cards", () => {
+    const prompt = buildManagerPrompt(epic, [
+      {
+        key: "child-0",
+        title: "Build widget API",
+        description: "Backend for the widget.",
+        cardType: "feature",
+        riskTier: "low",
+        priority: 2,
+        tags: ["api"],
+        acceptanceCriteria: ["returns widget data"],
+      },
+    ]);
+    expect(prompt).toContain("## Epic: Widget rollout");
+    expect(prompt).toContain("### child-0: Build widget API");
+    expect(prompt).toContain("- returns widget data");
+    expect(prompt).toContain("risk=low priority=2 tags=api");
+  });
+
+  it("notes when there are no child cards", () => {
+    const prompt = buildManagerPrompt(epic, []);
+    expect(prompt).toContain("(none)");
+  });
+
+  it("reuses the same fenced-block decomposition output format as the planner", () => {
+    const prompt = buildManagerPrompt(epic, []);
+    expect(prompt).toContain("```markdown");
+    expect(prompt).toContain("```json");
+    expect(prompt).toContain('"epic"');
+    expect(prompt).toContain('"dependsOn"');
+  });
+
+  it("includes linked spec doc bodies", () => {
+    const prompt = buildManagerPrompt(epic, [], [{ title: "Auth Spec", body: "All requests must be authenticated." }]);
+    expect(prompt).toContain("## Linked spec docs");
+    expect(prompt).toContain("### Spec: Auth Spec");
+  });
+
+  it("instructs that the output cards array replaces the current breakdown", () => {
+    const prompt = buildManagerPrompt(epic, []);
+    expect(prompt).toContain("replaces");
   });
 });
 
