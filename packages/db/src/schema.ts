@@ -132,6 +132,26 @@ export const cardDependencies = pgTable(
   ],
 );
 
+// Structured, turn-based Q&A: an agent ends its turn with QUESTION: <text>
+// instead of guessing or failing, the card pauses blocked, a human answers
+// via the API, and the answer is injected into the next dispatch's prompt.
+export const cardQuestions = pgTable("card_questions", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  cardId: uuid("card_id")
+    .notNull()
+    .references(() => cards.id, { onDelete: "cascade" }),
+  agentRunId: uuid("agent_run_id").references((): AnyPgColumn => agentRuns.id),
+  roleName: text("role_name").notNull(),
+  question: text("question").notNull(),
+  status: text("status").notNull().default("open"), // open | answered
+  // No manager tier exists yet, so v1 always routes to the product owner.
+  routedTo: text("routed_to").notNull().default("product_owner"),
+  answer: text("answer"),
+  answeredBy: text("answered_by"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  answeredAt: timestamp("answered_at", { withTimezone: true }),
+});
+
 // ===== Agents (Phase 2+, tables scaffolded now for FK stability) =====
 export const agentRoles = pgTable("agent_roles", {
   id: uuid("id").primaryKey().defaultRandom(),

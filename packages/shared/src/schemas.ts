@@ -3,6 +3,7 @@ import {
   AGENT_RUN_STATUSES,
   CARD_DEPENDENCY_TYPES,
   CARD_DOC_LINK_TYPES,
+  CARD_QUESTION_STATUSES,
   CARD_STATES,
   CARD_TYPES,
   DEPLOY_STATUSES,
@@ -172,6 +173,27 @@ export const CardTransitionInputSchema = z.object({
   actorId: uuid.optional(),
 });
 export type CardTransitionInput = z.infer<typeof CardTransitionInputSchema>;
+
+export const CardQuestionSchema = z.object({
+  id: uuid,
+  cardId: uuid,
+  agentRunId: uuid.nullable(),
+  roleName: z.string().min(1),
+  question: z.string().min(1),
+  status: z.enum(CARD_QUESTION_STATUSES).default("open"),
+  routedTo: z.string().min(1).default("product_owner"),
+  answer: z.string().nullable(),
+  answeredBy: z.string().nullable(),
+  createdAt: isoDate,
+  answeredAt: isoDate.nullable(),
+});
+export type CardQuestion = z.infer<typeof CardQuestionSchema>;
+
+export const AnswerCardQuestionInputSchema = z.object({
+  answer: z.string().min(1),
+  answeredBy: z.string().min(1).default("product_owner"),
+});
+export type AnswerCardQuestionInput = z.infer<typeof AnswerCardQuestionInputSchema>;
 
 export const CardDocLinkSchema = z.object({
   cardId: uuid,

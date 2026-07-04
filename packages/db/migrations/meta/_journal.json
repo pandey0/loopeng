@@ -29,6 +29,13 @@
       "when": 1783013900209,
       "tag": "0003_nostalgic_jimmy_woo",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1783181455775,
+      "tag": "0004_early_rocket_racer",
+      "breakpoints": true
     }
   ]
 }

@@ -39,6 +39,8 @@ export default function CardDetailPage({ params }: { params: Promise<{ cardId: s
   const [newCriterion, setNewCriterion] = useState("");
   const [saving, setSaving] = useState(false);
   const [sessionRun, setSessionRun] = useState<CardDetailAgentRun | null>(null);
+  const [answerDrafts, setAnswerDrafts] = useState<Record<string, string>>({});
+  const [answering, setAnswering] = useState<string | null>(null);
 
   useEffect(() => {
     if (detailQuery.data) setCriteria(detailQuery.data.acceptanceCriteria);
@@ -115,6 +117,21 @@ export default function CardDetailPage({ params }: { params: Promise<{ cardId: s
 
   function removeCriterion(index: number) {
     saveCriteria(criteria.filter((_, i) => i !== index));
+  }
+
+  async function submitAnswer(questionId: string) {
+    const answer = (answerDrafts[questionId] ?? "").trim();
+    if (!answer) return;
+    setAnswering(questionId);
+    try {
+      await api.answerCardQuestion(cardId, questionId, answer);
+      queryClient.invalidateQueries({ queryKey: ["card-detail", cardId] });
+      queryClient.invalidateQueries({ queryKey: ["cards"] });
+    } catch (err) {
+      alert((err as Error).message);
+    } finally {
+      setAnswering(null);
+    }
   }
 
   const overview = (
@@ -207,6 +224,44 @@ export default function CardDetailPage({ params }: { params: Promise<{ cardId: s
 
   const activity = (
     <div>
+      <h3 className="mb-2 text-lg font-semibold">Questions</h3>
+      {card.questions.length === 0 ? (
+        <p className="mb-6 text-xs text-muted-foreground">No questions raised yet.</p>
+      ) : (
+        <ul className="mb-6 list-none p-0 text-sm">
+          {card.questions.map((q) => (
+            <li key={q.id} className="mb-3 rounded border p-3">
+              <div className="mb-1 flex items-center gap-2 text-xs text-muted-foreground">
+                <Badge variant={q.status === "open" ? "destructive" : "secondary"} className="text-[10px]">
+                  {q.status}
+                </Badge>
+                <span>{q.roleName}</span>
+                <span>{new Date(q.createdAt).toLocaleString()}</span>
+              </div>
+              <p className="mb-2">{q.question}</p>
+              {q.status === "answered" ? (
+                <p className="text-xs text-muted-foreground">
+                  <span className="font-medium">Answer</span> ({q.answeredBy ?? "product_owner"}): {q.answer}
+                </p>
+              ) : (
+                <div className="flex gap-2">
+                  <Input
+                    value={answerDrafts[q.id] ?? ""}
+                    onChange={(e) => setAnswerDrafts((prev) => ({ ...prev, [q.id]: e.target.value }))}
+                    onKeyDown={(e) => e.key === "Enter" && submitAnswer(q.id)}
+                    placeholder="Answer this question"
+                    className="flex-1"
+                  />
+                  <Button size="sm" disabled={answering === q.id} onClick={() => submitAnswer(q.id)}>
+                    Answer
+                  </Button>
+                </div>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+
       <h3 className="mb-2 text-lg font-semibold">Timeline</h3>
       {timeline.length === 0 ? (
         <p className="mb-6 text-xs text-muted-foreground">No activity recorded yet.</p>

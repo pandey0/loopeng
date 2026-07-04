@@ -1,6 +1,6 @@
-import { and, eq } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 import { db } from "@loopeng/db";
-import { agentRoles, agentRuns, cardDocLinks, cards, docs as docsTable } from "@loopeng/db";
+import { agentRoles, agentRuns, cardDocLinks, cardQuestions, cards, docs as docsTable } from "@loopeng/db";
 import { getDoc, listDocs } from "@loopeng/doc-engine";
 
 type Card = typeof cards.$inferSelect;
@@ -8,7 +8,15 @@ import { getActiveWorktree, getRepoDiff, resolveRepoRoot } from "@loopeng/worktr
 import { runClaudeCliStreamingOnce } from "./claude-cli.js";
 import { parsePlannerOutput, persistDecomposition, PlannerOutputError, type PersistedDecomposition } from "./decomposition.js";
 import { writeAgentLog } from "./logs.js";
-import { buildImplementerPrompt, buildPlannerPrompt, buildReviewerPrompt, type SkillContext, type SpecDocContext } from "./prompts.js";
+import {
+  buildImplementerPrompt,
+  buildPlannerPrompt,
+  buildReviewerPrompt,
+  type AnsweredQuestionContext,
+  type SkillContext,
+  type SpecDocContext,
+} from "./prompts.js";
+import { extractQuestion } from "./questions.js";
 import { buildSubAgentMcpConfig } from "./sub-agent.js";
 
 export interface AgentRunResult {
@@ -17,6 +25,25 @@ export interface AgentRunResult {
   resultText: string;
   costUsd?: number;
   logsRef: string;
+  /** Set when the run ended its turn with the QUESTION: convention instead of finishing normally. */
+  question?: string;
+}
+
+// Injected into the next dispatch's prompt (buildImplementerPrompt) so the
+// agent can see how a question it (or a previous attempt) raised was
+// answered. Capped rather than tracking per-question "consumed" state —
+// simpler, and acceptable given typical card lifetime (spec: card-questions-escalation).
+const MAX_ANSWERED_QUESTIONS_IN_PROMPT = 5;
+
+async function loadAnsweredQuestions(cardId: string): Promise<AnsweredQuestionContext[]> {
+  const rows = await db
+    .select({ question: cardQuestions.question, answer: cardQuestions.answer })
+    .from(cardQuestions)
+    .where(and(eq(cardQuestions.cardId, cardId), eq(cardQuestions.status, "answered")))
+    .orderBy(desc(cardQuestions.answeredAt))
+    .limit(MAX_ANSWERED_QUESTIONS_IN_PROMPT);
+
+  return rows.filter((r): r is { question: string; answer: string } => r.answer !== null).reverse();
 }
 
 export interface ReviewerRunResult extends AgentRunResult {
@@ -72,7 +99,8 @@ export async function runImplementerAgent(card: Card, priorFailureNote?: string)
   const roleId = await getRoleId("implementer");
   const skills = await loadRelevantSkills(card);
   const specDocs = await loadLinkedSpecDocs(card);
-  const prompt = buildImplementerPrompt(card, skills, priorFailureNote, specDocs);
+  const answeredQuestions = await loadAnsweredQuestions(card.id);
+  const prompt = buildImplementerPrompt(card, skills, priorFailureNote, specDocs, answeredQuestions);
 
   const [run] = await db
     .insert(agentRuns)
@@ -101,6 +129,11 @@ export async function runImplementerAgent(card: Card, priorFailureNote?: string)
   });
   const logsRef = await writeAgentLog(run.id, result.raw);
 
+  // A clean end-of-turn QUESTION: (never on an errored run — that's a crash,
+  // not a deliberate escalation) is neither a success nor a failure: the
+  // orchestrator pauses the card instead of advancing or retrying.
+  const question = !result.isError ? extractQuestion(result.resultText) : null;
+
   await db
     .update(agentRuns)
     .set({
@@ -110,7 +143,14 @@ export async function runImplementerAgent(card: Card, priorFailureNote?: string)
     })
     .where(eq(agentRuns.id, run.id));
 
-  return { agentRunId: run.id, isError: result.isError, resultText: result.resultText, costUsd: result.totalCostUsd, logsRef };
+  return {
+    agentRunId: run.id,
+    isError: result.isError,
+    resultText: result.resultText,
+    costUsd: result.totalCostUsd,
+    logsRef,
+    question: question ?? undefined,
+  };
 }
 
 export interface PlannerRunResult extends AgentRunResult, PersistedDecomposition {}

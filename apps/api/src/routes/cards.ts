@@ -7,6 +7,7 @@ import {
   agentRuns,
   cardDependencies,
   cardDocLinks,
+  cardQuestions,
   cards,
   docs,
   eventLog,
@@ -14,6 +15,7 @@ import {
   gateResults,
 } from "@loopeng/db";
 import {
+  AnswerCardQuestionInputSchema,
   CardCreateInputSchema,
   CardTransitionInputSchema,
   CardUpdateInputSchema,
@@ -72,7 +74,7 @@ export const cardRoutes: FastifyPluginAsync = async (fastify) => {
       reply.status(404).send({ error: "not_found" });
       return;
     }
-    const [dependsOn, dependents, linkedDocs, agentRunRows, gateResultRows, events] = await Promise.all([
+    const [dependsOn, dependents, linkedDocs, agentRunRows, gateResultRows, events, questions] = await Promise.all([
       fastify.db.select().from(cardDependencies).where(eq(cardDependencies.cardId, id)),
       fastify.db.select().from(cardDependencies).where(eq(cardDependencies.dependsOnCardId, id)),
       fastify.db
@@ -118,6 +120,7 @@ export const cardRoutes: FastifyPluginAsync = async (fastify) => {
         .from(eventLog)
         .where(and(eq(eventLog.entityType, "card"), eq(eventLog.entityId, id)))
         .orderBy(desc(eventLog.id)),
+      fastify.db.select().from(cardQuestions).where(eq(cardQuestions.cardId, id)).orderBy(desc(cardQuestions.createdAt)),
     ]);
 
     return {
@@ -128,6 +131,7 @@ export const cardRoutes: FastifyPluginAsync = async (fastify) => {
       agentRuns: agentRunRows.map((run) => ({ ...run, live: isRunLive(run.id) })),
       gateResults: gateResultRows,
       events,
+      questions,
     };
   });
 
@@ -146,6 +150,37 @@ export const cardRoutes: FastifyPluginAsync = async (fastify) => {
     const { id } = request.params as { id: string };
     await fastify.orchestrator.coordination.dispatch(id);
     reply.status(202).send({ dispatched: id });
+  });
+
+  // Human answers a card_questions escalation (spec: card-questions-escalation).
+  // Auto-resumes the card blocked -> ready so it redispatches on the next
+  // event-trigger tick, with the Q&A injected into the implementer's prompt.
+  fastify.post("/cards/:id/questions/:questionId/answer", async (request, reply) => {
+    const { id, questionId } = request.params as { id: string; questionId: string };
+    const input = AnswerCardQuestionInputSchema.parse(request.body);
+
+    const [question] = await fastify.db.select().from(cardQuestions).where(eq(cardQuestions.id, questionId));
+    if (!question || question.cardId !== id) {
+      reply.status(404).send({ error: "not_found" });
+      return;
+    }
+    if (question.status === "answered") {
+      reply.status(409).send({ error: "already_answered" });
+      return;
+    }
+
+    const [updated] = await fastify.db
+      .update(cardQuestions)
+      .set({ status: "answered", answer: input.answer, answeredBy: input.answeredBy, answeredAt: new Date() })
+      .where(eq(cardQuestions.id, questionId))
+      .returning();
+
+    const [card] = await fastify.db.select().from(cards).where(eq(cards.id, id));
+    if (card?.state === "blocked") {
+      await applyTransition({ cardId: id, toState: "ready", actorType: "user" });
+    }
+
+    reply.send(updated);
   });
 
   fastify.post("/cards/:id/dependencies", async (request, reply) => {
