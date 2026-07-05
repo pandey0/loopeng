@@ -47,6 +47,11 @@ async function main() {
       description: "Turns a freeform product-owner request into a spec doc plus epic/feature/bug cards, ready for auto-pickup",
       capabilities: ["planning"],
     },
+    {
+      name: "tech-manager",
+      description: "Reviews a freshly-decomposed epic's child cards and may adjust the breakdown; escalation target for QUESTION:s from its cards",
+      capabilities: ["management"],
+    },
   ]);
 
   await db.insert(gateDefinitions).values([

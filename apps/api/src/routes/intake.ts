@@ -1,17 +1,20 @@
 import type { FastifyPluginAsync } from "fastify";
 import { eq } from "drizzle-orm";
 import { boards, eventLog } from "@loopeng/db";
-import { PlannerOutputError, startPlannerAgent, type PlannerRunResult } from "@loopeng/agents";
+import { PlannerOutputError, runManagerAgent, startPlannerAgent, type PlannerRunResult } from "@loopeng/agents";
 import { IntakeInputSchema } from "@loopeng/shared";
 
 export type IntakeStatusResponse =
   | { status: "running" }
-  | { status: "succeeded"; result: { agentRunId: string; epicCardId: string; cardIds: string[]; specDocId: string } }
+  | {
+      status: "succeeded";
+      result: { agentRunId: string; epicCardId: string; cardIds: string[]; specDocId: string; managerAgentRunId?: string };
+    }
   | { status: "failed"; error: string; code?: "planner_output_invalid" };
 
 type IntakeOutcome =
   | { status: "running" }
-  | { status: "succeeded"; result: PlannerRunResult }
+  | { status: "succeeded"; result: PlannerRunResult & { managerAgentRunId?: string } }
   | { status: "failed"; error: string; code?: "planner_output_invalid" };
 
 // Process-local map from agentRunId to how its background intake run ended,
@@ -61,7 +64,33 @@ export const intakeRoutes: FastifyPluginAsync = async (fastify) => {
           actorId: input.requestedById ?? null,
           payload: { agentRunId: r.agentRunId, cardIds: r.cardIds, specDocId: r.specDocId },
         });
-        intakeOutcomes.set(agentRunId, { status: "succeeded", result: r });
+
+        // Every fresh epic gets a one-time tech-manager review before its
+        // cards are left for a human to move to "ready" (spec:
+        // org-chart-manager-agent-role) — it may adjust the breakdown
+        // (split/merge/reprioritize), which is why the succeeded outcome's
+        // cardIds below can differ from the planner's original r.cardIds.
+        // A failure here doesn't invalidate the intake overall: the
+        // planner's cards already landed in backlog, so we still report
+        // success with the planner's original breakdown rather than losing
+        // that work over a supplementary review step erroring out.
+        try {
+          const managerResult = await runManagerAgent(r.epicCardId);
+          await fastify.db.insert(eventLog).values({
+            entityType: "card",
+            entityId: r.epicCardId,
+            eventType: "card.epic_reviewed",
+            actorType: "agent",
+            payload: { agentRunId: managerResult.agentRunId, cardIds: managerResult.cardIds, removedCardIds: managerResult.removedCardIds },
+          });
+          intakeOutcomes.set(agentRunId, {
+            status: "succeeded",
+            result: { ...r, cardIds: managerResult.cardIds, managerAgentRunId: managerResult.agentRunId },
+          });
+        } catch (managerErr) {
+          console.error("[intake] manager review failed, keeping planner's original decomposition", managerErr);
+          intakeOutcomes.set(agentRunId, { status: "succeeded", result: r });
+        }
       })
       .catch((err) => {
         const code = err instanceof PlannerOutputError ? "planner_output_invalid" : undefined;
@@ -85,8 +114,10 @@ export const intakeRoutes: FastifyPluginAsync = async (fastify) => {
       return;
     }
     if (outcome.status === "succeeded") {
-      const { agentRunId: id, epicCardId, cardIds, specDocId } = outcome.result;
-      reply.status(200).send({ status: "succeeded", result: { agentRunId: id, epicCardId, cardIds, specDocId } } satisfies IntakeStatusResponse);
+      const { agentRunId: id, epicCardId, cardIds, specDocId, managerAgentRunId } = outcome.result;
+      reply
+        .status(200)
+        .send({ status: "succeeded", result: { agentRunId: id, epicCardId, cardIds, specDocId, managerAgentRunId } } satisfies IntakeStatusResponse);
       return;
     }
     reply.status(200).send({ status: "failed", error: outcome.error, code: outcome.code } satisfies IntakeStatusResponse);

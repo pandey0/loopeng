@@ -91,6 +91,41 @@ export function buildImplementerPrompt(
   ].join("\n");
 }
 
+// Shared by the planner (fresh intake) and the manager (epic review) — both
+// emit a spec doc + decomposition pair in the exact shape parsePlannerOutput
+// expects, just from different starting contexts.
+const DECOMPOSITION_OUTPUT_FORMAT = [
+  "## Output format",
+  "Respond with exactly two fenced blocks, in this order, and nothing else outside them.",
+  "",
+  "1. A ```markdown block containing the spec doc body (no frontmatter, start directly with",
+  '   headings like "## Summary"). This becomes the spec doc every decomposed card links back',
+  "   to for context — write it so an implementer agent who has never seen this request can",
+  "   understand the goal, motivation, and design from this doc alone.",
+  "",
+  "2. A ```json block containing the decomposition, matching this shape exactly:",
+  "```json",
+  "{",
+  '  "epic": { "title": string, "description": string },',
+  '  "cards": [',
+  "    {",
+  '      "key": string,               // short unique key within this batch, e.g. "auth-api";',
+  "                                    // referenced by other cards' dependsOn, never sent to the board",
+  '      "title": string,',
+  '      "description": string,',
+  '      "cardType": "feature" | "bug" | "chore" | "spike",',
+  '      "riskTier": "low" | "medium" | "high",',
+  '      "priority": number,          // 1 (highest) - 5 (lowest)',
+  '      "tags": string[],',
+  '      "acceptanceCriteria": string[],',
+  '      "dependsOn": string[]        // keys of other cards in this batch that must be done',
+  "                                    // first (blocking dependencies); [] if none",
+  "    }",
+  "  ]",
+  "}",
+  "```",
+].join("\n");
+
 export function buildPlannerPrompt(requestText: string, existingCardTitles: string[] = []): string {
   return [
     "You are the planner (PM) agent on an internal dev-team platform. A product owner has sent",
@@ -105,35 +140,7 @@ export function buildPlannerPrompt(requestText: string, existingCardTitles: stri
     "## Existing open cards on this board (avoid duplicating work already tracked)",
     existingCardTitles.length ? existingCardTitles.map((t) => `- ${t}`).join("\n") : "(none)",
     "",
-    "## Output format",
-    "Respond with exactly two fenced blocks, in this order, and nothing else outside them.",
-    "",
-    "1. A ```markdown block containing the spec doc body (no frontmatter, start directly with",
-    '   headings like "## Summary"). This becomes the spec doc every decomposed card links back',
-    "   to for context — write it so an implementer agent who has never seen this request can",
-    "   understand the goal, motivation, and design from this doc alone.",
-    "",
-    "2. A ```json block containing the decomposition, matching this shape exactly:",
-    "```json",
-    "{",
-    '  "epic": { "title": string, "description": string },',
-    '  "cards": [',
-    "    {",
-    '      "key": string,               // short unique key within this batch, e.g. "auth-api";',
-    "                                    // referenced by other cards' dependsOn, never sent to the board",
-    '      "title": string,',
-    '      "description": string,',
-    '      "cardType": "feature" | "bug" | "chore" | "spike",',
-    '      "riskTier": "low" | "medium" | "high",',
-    '      "priority": number,          // 1 (highest) - 5 (lowest)',
-    '      "tags": string[],',
-    '      "acceptanceCriteria": string[],',
-    '      "dependsOn": string[]        // keys of other cards in this batch that must be done',
-    "                                    // first (blocking dependencies); [] if none",
-    "    }",
-    "  ]",
-    "}",
-    "```",
+    DECOMPOSITION_OUTPUT_FORMAT,
     "",
     "## Instructions",
     "Break the request into the smallest independently-shippable cards you can, each with",
@@ -141,6 +148,63 @@ export function buildPlannerPrompt(requestText: string, existingCardTitles: stri
     "Set riskTier per card based on blast radius (touches auth/billing/data-loss -> high;",
     "isolated/reversible -> low). Only add a dependsOn edge when a card genuinely cannot start",
     "before another finishes — over-linking serializes work that could run in parallel.",
+  ].join("\n");
+}
+
+export interface ManagerChildCardContext {
+  key: string;
+  title: string;
+  description: string | null;
+  cardType: string;
+  riskTier: string;
+  priority: number;
+  tags: string[];
+  acceptanceCriteria: string[];
+}
+
+// The manager gets exactly one shot at this, right after intake creates the
+// epic (spec: org-chart-manager-agent-role) — it is not a standing process,
+// so it must commit to a final breakdown in this single turn rather than
+// asking the epic to keep coming back.
+export function buildManagerPrompt(epic: Card, childCards: ManagerChildCardContext[], specDocs: SpecDocContext[] = []): string {
+  const childCardsBlock = childCards
+    .map((c) =>
+      [
+        `### ${c.key}: ${c.title}`,
+        `type=${c.cardType} risk=${c.riskTier} priority=${c.priority} tags=${c.tags.join(",") || "(none)"}`,
+        c.description ?? "(no description)",
+        c.acceptanceCriteria.length ? c.acceptanceCriteria.map((a) => `- ${a}`).join("\n") : "(no acceptance criteria)",
+      ].join("\n"),
+    )
+    .join("\n\n");
+
+  return [
+    "You are the tech-manager agent on an internal dev-team platform. A planner agent just",
+    "decomposed a product owner's request into this epic and its child cards. Your job is to",
+    "review that breakdown once and, if needed, adjust it — split a card that bundles too much,",
+    "merge cards that are really one unit of work, reprioritize, or correct a risk tier. You do",
+    "not write code and do not have file or shell tools — your entire output is the two fenced",
+    "blocks described below. You are also the escalation contact these child cards will route",
+    "QUESTION:s to going forward, so make sure the breakdown you leave behind is one you'd be",
+    "comfortable fielding questions about.",
+    "",
+    `## Epic: ${epic.title}`,
+    epic.description ?? "(no description provided)",
+    "",
+    "## Linked spec docs",
+    formatSpecDocsBlock(specDocs),
+    "",
+    "## Current child cards (as decomposed by the planner)",
+    childCardsBlock || "(none)",
+    "",
+    DECOMPOSITION_OUTPUT_FORMAT,
+    "",
+    "## Instructions",
+    'The "epic" field in your JSON output is not used to create a new epic — restate this epic\'s',
+    "title and description in it. The full \"cards\" array you output *replaces* the current child",
+    "cards listed above, so include every card that should still exist (unchanged ones included",
+    "verbatim) plus any you're adding, splitting, or merging in. If the current breakdown is",
+    "already good, it is fine to return it unchanged.",
   ].join("\n");
 }
 

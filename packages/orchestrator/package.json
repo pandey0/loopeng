@@ -8,7 +8,8 @@
   "scripts": {
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "verify:e2e": "tsx src/scripts/verify-pipeline-e2e.ts",
-    "verify:questions:e2e": "tsx src/scripts/verify-card-questions-e2e.ts"
+    "verify:questions:e2e": "tsx src/scripts/verify-card-questions-e2e.ts",
+    "verify:manager:e2e": "tsx src/scripts/verify-manager-agent-e2e.ts"
   },
   "dependencies": {
     "@loopeng/agents": "workspace:*",

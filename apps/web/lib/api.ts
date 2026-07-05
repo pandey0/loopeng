@@ -68,6 +68,7 @@ export interface IntakeResult {
   epicCardId: string;
   cardIds: string[];
   specDocId: string;
+  managerAgentRunId: string;
 }
 
 export interface IntakeStartResult {
