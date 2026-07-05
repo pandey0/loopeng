@@ -74,6 +74,15 @@ export function buildSubAgentMcpConfig(ctx: SubAgentContext): Record<string, unk
           LOOPENG_DELEGATION_DEPTH: String(ctx.depth),
           LOOPENG_DISALLOWED_TOOLS: (ctx.disallowedTools ?? []).join(","),
           DATABASE_URL: process.env.DATABASE_URL ?? "",
+          // The MCP server subprocess is spawned by the `claude` CLI itself
+          // per --mcp-config, not by us directly — whether it inherits our
+          // process.env (vs. only the keys listed here) isn't something we
+          // control, so WIKI_REPO_PATH must be threaded through explicitly.
+          // Without this, get_doc (packages/mcp-subagent/src/server.ts) can
+          // silently resolve a different repo than the one this process is
+          // using (its own cwd-relative default instead of ours), returning
+          // ENOENT for docs that very much exist — just not at that path.
+          ...(process.env.WIKI_REPO_PATH ? { WIKI_REPO_PATH: process.env.WIKI_REPO_PATH } : {}),
         },
       },
     },

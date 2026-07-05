@@ -8,6 +8,7 @@ import { Button } from "./components/button";
 
 export interface AdrFormValues {
   title: string;
+  summary: string;
   tags: string[];
   content: string;
 }
@@ -20,6 +21,7 @@ export interface AdrFormProps {
 
 export function AdrForm({ templateContent, onSubmit, submitting = false }: AdrFormProps) {
   const [title, setTitle] = useState("");
+  const [summary, setSummary] = useState("");
   const [tags, setTags] = useState("");
   const [content, setContent] = useState(templateContent);
 
@@ -29,6 +31,7 @@ export function AdrForm({ templateContent, onSubmit, submitting = false }: AdrFo
         e.preventDefault();
         onSubmit({
           title,
+          summary,
           tags: tags.split(",").map((t) => t.trim()).filter(Boolean),
           content,
         });
@@ -38,6 +41,10 @@ export function AdrForm({ templateContent, onSubmit, submitting = false }: AdrFo
       <Label>
         Title
         <Input value={title} onChange={(e) => setTitle(e.target.value)} required className="mt-1" />
+      </Label>
+      <Label>
+        Summary (one line — shown in agent prompts instead of the full doc)
+        <Input value={summary} onChange={(e) => setSummary(e.target.value)} required className="mt-1" />
       </Label>
       <Label>
         Tags (comma separated)

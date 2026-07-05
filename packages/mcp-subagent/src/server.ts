@@ -2,6 +2,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 import { spawnSubAgent, SubAgentDepthExceededError } from "@loopeng/agents";
+import { getDoc } from "@loopeng/doc-engine";
 
 // This process is spawned per-session by the `claude` CLI (via --mcp-config,
 // see buildSubAgentMcpConfig in @loopeng/agents) — one instance per running
@@ -75,6 +76,32 @@ server.registerTool(
       }
       const message = err instanceof Error ? err.message : String(err);
       return { isError: true, content: [{ type: "text" as const, text: `spawn_sub_agent failed: ${message}` }] };
+    }
+  },
+);
+
+server.registerTool(
+  "get_doc",
+  {
+    description:
+      "Fetch the full text of a doc-engine doc (spec/ADR/RFC/skill/wiki) by slug. Prompts only " +
+      "inline a one-line summary per linked doc to stay small — call this when a summary suggests " +
+      "the full doc has detail you actually need for the task at hand.",
+    inputSchema: {
+      slug: z.string().min(1).describe("The doc's slug, exactly as shown next to its summary in the prompt."),
+    },
+  },
+  async ({ slug }) => {
+    try {
+      const doc = await getDoc(slug);
+      if (!doc) {
+        return { isError: true, content: [{ type: "text" as const, text: `get_doc: no doc found for slug "${slug}"` }] };
+      }
+      const text = [`# ${doc.title}`, `(${doc.docType}, status: ${doc.status})`, "", doc.body].join("\n");
+      return { isError: false, content: [{ type: "text" as const, text }] };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      return { isError: true, content: [{ type: "text" as const, text: `get_doc failed: ${message}` }] };
     }
   },
 );

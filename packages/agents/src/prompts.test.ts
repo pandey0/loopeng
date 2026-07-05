@@ -42,13 +42,27 @@ describe("buildImplementerPrompt", () => {
     expect(prompt).toContain("(none specified)");
   });
 
-  it("includes linked spec doc bodies", () => {
+  it("includes linked spec docs as a slug + one-line summary, not the full body", () => {
     const prompt = buildImplementerPrompt(card(), [], undefined, [
-      { title: "Auth Spec", body: "All requests must be authenticated." },
+      { slug: "auth-spec", title: "Auth Spec", summary: "All requests must be authenticated." },
     ]);
     expect(prompt).toContain("## Linked spec docs");
-    expect(prompt).toContain("### Spec: Auth Spec");
+    expect(prompt).toContain("`auth-spec`");
+    expect(prompt).toContain("Auth Spec");
     expect(prompt).toContain("All requests must be authenticated.");
+  });
+
+  it("tells the agent how to fetch a doc's full text via get_doc", () => {
+    const prompt = buildImplementerPrompt(card(), []);
+    expect(prompt).toContain("get_doc");
+    expect(prompt).toContain('{ "slug": "<slug>" }');
+  });
+
+  it("lists relevant skill docs as a slug + one-line summary", () => {
+    const prompt = buildImplementerPrompt(card(), [{ slug: "retry-etiquette", title: "Retry Etiquette", summary: "Keep retries idempotent." }]);
+    expect(prompt).toContain("## Relevant skill docs");
+    expect(prompt).toContain("`retry-etiquette`");
+    expect(prompt).toContain("Keep retries idempotent.");
   });
 
   it("documents the QUESTION: escalation convention", () => {
@@ -112,12 +126,12 @@ describe("buildReviewerPrompt", () => {
     expect(prompt).toContain("If any CRITERION line is marked NOT SATISFIED, the final verdict must be VERDICT: FAIL.");
   });
 
-  it("includes linked spec doc bodies", () => {
+  it("includes linked spec docs as a slug + one-line summary, not the full body", () => {
     const prompt = buildReviewerPrompt(card({ acceptanceCriteria: ["handles empty state"] }), "diff --git a/x b/x", [
-      { title: "Auth Spec", body: "All requests must be authenticated." },
+      { slug: "auth-spec", title: "Auth Spec", summary: "All requests must be authenticated." },
     ]);
     expect(prompt).toContain("## Linked spec docs");
-    expect(prompt).toContain("### Spec: Auth Spec");
+    expect(prompt).toContain("`auth-spec`");
     expect(prompt).toContain("All requests must be authenticated.");
   });
 });

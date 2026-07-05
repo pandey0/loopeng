@@ -8,7 +8,9 @@
   "scripts": {
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "verify:e2e": "tsx src/scripts/verify-pipeline-e2e.ts",
-    "verify:questions:e2e": "tsx src/scripts/verify-card-questions-e2e.ts"
+    "verify:questions:e2e": "tsx src/scripts/verify-card-questions-e2e.ts",
+    "backfill:vault-summaries": "tsx src/scripts/backfill-vault-summaries.ts",
+    "measure:prompt-size": "tsx src/scripts/measure-prompt-size.ts"
   },
   "dependencies": {
     "@loopeng/agents": "workspace:*",
