@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { cards } from "@loopeng/db";
-import { buildImplementerPrompt, buildPlannerPrompt, buildReviewerPrompt } from "./prompts";
+import { buildDesignerReviewPrompt, buildDesignerSpecPrompt, buildImplementerPrompt, buildPlannerPrompt, buildReviewerPrompt } from "./prompts";
 
 type Card = typeof cards.$inferSelect;
 
@@ -119,5 +119,63 @@ describe("buildReviewerPrompt", () => {
     expect(prompt).toContain("## Linked spec docs");
     expect(prompt).toContain("### Spec: Auth Spec");
     expect(prompt).toContain("All requests must be authenticated.");
+  });
+});
+
+describe("buildDesignerSpecPrompt", () => {
+  it("lists each acceptance criterion", () => {
+    const prompt = buildDesignerSpecPrompt(card({ acceptanceCriteria: ["shows the widget"] }));
+    expect(prompt).toContain("## Acceptance criteria");
+    expect(prompt).toContain("- shows the widget");
+  });
+
+  it("asks for reuse of existing packages/ui components and tokens", () => {
+    const prompt = buildDesignerSpecPrompt(card());
+    expect(prompt).toContain("packages/ui components and design tokens to reuse");
+  });
+
+  it("asks for interaction states and accessibility notes", () => {
+    const prompt = buildDesignerSpecPrompt(card());
+    expect(prompt).toContain("loading, empty, and error");
+    expect(prompt).toContain("accessibility notes");
+  });
+
+  it("requires a single fenced markdown block", () => {
+    const prompt = buildDesignerSpecPrompt(card());
+    expect(prompt).toContain("```markdown");
+  });
+
+  it("is read-only, disallowing edit/write/shell", () => {
+    const prompt = buildDesignerSpecPrompt(card());
+    expect(prompt).toContain("cannot edit, write, or run shell commands");
+  });
+});
+
+describe("buildDesignerReviewPrompt", () => {
+  it("includes the diff to review", () => {
+    const prompt = buildDesignerReviewPrompt(card(), "diff --git a/x b/x");
+    expect(prompt).toContain("diff --git a/x b/x");
+  });
+
+  it("checks token usage, component reuse, and accessibility regressions", () => {
+    const prompt = buildDesignerReviewPrompt(card(), "diff --git a/x b/x");
+    expect(prompt).toContain("Design-system token usage vs hardcoded style values");
+    expect(prompt).toContain("Component reuse vs one-off markup");
+    expect(prompt).toContain("responsive or accessibility regressions");
+  });
+
+  it("includes linked spec doc bodies", () => {
+    const prompt = buildDesignerReviewPrompt(card(), "diff --git a/x b/x", [
+      { title: "Design Spec", body: "Use the Button component from packages/ui." },
+    ]);
+    expect(prompt).toContain("## Linked spec docs");
+    expect(prompt).toContain("### Spec: Design Spec");
+    expect(prompt).toContain("Use the Button component from packages/ui.");
+  });
+
+  it("ends with the VERDICT convention", () => {
+    const prompt = buildDesignerReviewPrompt(card(), "diff --git a/x b/x");
+    expect(prompt).toContain("VERDICT: PASS");
+    expect(prompt).toContain("VERDICT: FAIL");
   });
 });

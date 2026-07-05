@@ -265,6 +265,9 @@ importers:
       '@loopeng/db':
         specifier: workspace:*
         version: link:../db
+      '@loopeng/doc-engine':
+        specifier: workspace:*
+        version: link:../doc-engine
       '@loopeng/shared':
         specifier: workspace:*
         version: link:../shared

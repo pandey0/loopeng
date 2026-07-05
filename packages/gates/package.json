@@ -11,6 +11,7 @@
   "dependencies": {
     "@loopeng/connectors": "workspace:*",
     "@loopeng/db": "workspace:*",
+    "@loopeng/doc-engine": "workspace:*",
     "@loopeng/shared": "workspace:*",
     "@loopeng/worktree-manager": "workspace:*",
     "drizzle-orm": "^0.36.1",

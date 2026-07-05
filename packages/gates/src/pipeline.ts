@@ -15,10 +15,10 @@ export interface GatePipelineResult {
   results: { key: string; name: string; blocking: boolean; outcome: GateOutcome }[];
 }
 
-// peer_review (Phase 2, orchestrator-owned) and deploy_live (Phase 4,
-// deploy-engine-owned) are gate_definitions rows but not run from here —
-// each phase owns writing its own gate_results.
-const PIPELINE_OWNED_KEYS_EXCLUDED = ["peer_review", "deploy_live"];
+// peer_review and design_review (Phase 2, orchestrator-owned) and deploy_live
+// (Phase 4, deploy-engine-owned) are gate_definitions rows but not run from
+// here — each phase owns writing its own gate_results.
+const PIPELINE_OWNED_KEYS_EXCLUDED = ["peer_review", "design_review", "deploy_live"];
 
 export async function runGatePipeline(card: CardRow, worktreePath: string, baseCommitSha: string): Promise<GatePipelineResult> {
   const definitions = await db.select().from(gateDefinitions).where(eq(gateDefinitions.enabled, true));

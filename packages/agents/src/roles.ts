@@ -1,7 +1,7 @@
 import { and, desc, eq } from "drizzle-orm";
 import { db } from "@loopeng/db";
 import { agentRoles, agentRuns, cardDocLinks, cardQuestions, cards, docs as docsTable } from "@loopeng/db";
-import { getDoc, listDocs } from "@loopeng/doc-engine";
+import { createDoc, getDoc, listDocs } from "@loopeng/doc-engine";
 
 type Card = typeof cards.$inferSelect;
 import { getActiveWorktree, getRepoDiff, resolveRepoRoot } from "@loopeng/worktree-manager";
@@ -9,6 +9,8 @@ import { runClaudeCliStreamingOnce } from "./claude-cli.js";
 import { parsePlannerOutput, persistDecomposition, PlannerOutputError, type PersistedDecomposition } from "./decomposition.js";
 import { writeAgentLog } from "./logs.js";
 import {
+  buildDesignerReviewPrompt,
+  buildDesignerSpecPrompt,
   buildImplementerPrompt,
   buildPlannerPrompt,
   buildReviewerPrompt,
@@ -270,6 +272,142 @@ export async function runReviewerAgent(card: Card): Promise<ReviewerRunResult> {
   // gate pipeline.
   const verdict: "pass" | "fail" =
     !result.isError && !hasUnsatisfiedCriterion && verdictMatch?.[1]?.toUpperCase() === "PASS" ? "pass" : "fail";
+
+  await db
+    .update(agentRuns)
+    .set({ status: result.isError ? "failed" : "succeeded", verdict, logsRef, finishedAt: new Date() })
+    .where(eq(agentRuns.id, run.id));
+
+  return { agentRunId: run.id, isError: result.isError, resultText: result.resultText, costUsd: result.totalCostUsd, logsRef, verdict };
+}
+
+// Tags the design spec doc runDesignerSpecAgent creates, distinct from a
+// human- or planner-authored spec doc that happens to also be linkType=spec
+// — used by hasDesignerSpecDoc to tell whether the designer has already run
+// for this card, so a card that re-enters in_progress (e.g. after a
+// QUESTION: pause) doesn't get a duplicate spec doc / doc.slug collision.
+const DESIGN_SPEC_DOC_TAG = "design-spec";
+
+export async function hasDesignerSpecDoc(cardId: string): Promise<boolean> {
+  const linkedRows = await db
+    .select()
+    .from(cardDocLinks)
+    .innerJoin(docsTable, eq(cardDocLinks.docId, docsTable.id))
+    .where(and(eq(cardDocLinks.cardId, cardId), eq(cardDocLinks.linkType, "spec")));
+
+  return linkedRows.some((row) => row.docs.tags.includes(DESIGN_SPEC_DOC_TAG));
+}
+
+function extractFencedMarkdown(text: string): string | null {
+  const match = text.match(/```markdown\s*\n([\s\S]*?)```/);
+  return match ? match[1]!.trim() : null;
+}
+
+// Runs BEFORE the implementer, when a qualifying (UI/UX-touching) card enters
+// in_progress. Read-only like the reviewer, but also disallows Bash — it
+// only needs to read the existing codebase to recommend component/token
+// reuse, never to run anything. Its output is persisted as a wiki doc and
+// spec-linked to the card, so the implementer's next dispatch auto-loads it
+// via loadLinkedSpecDocs — no separate prompt-injection path needed.
+export async function runDesignerSpecAgent(card: Card): Promise<AgentRunResult> {
+  const worktree = await getActiveWorktree(card.id);
+  if (!worktree) throw new Error(`no active worktree for card ${card.id}`);
+
+  const roleId = await getRoleId("designer");
+  const prompt = buildDesignerSpecPrompt(card);
+
+  const [run] = await db
+    .insert(agentRuns)
+    .values({ cardId: card.id, agentRoleId: roleId, worktreeId: worktree.id, status: "running", startedAt: new Date() })
+    .returning();
+  if (!run) throw new Error("failed to insert agent_runs row");
+
+  const designerDisallowedTools = ["Edit", "Write", "NotebookEdit", "Bash"];
+  const mcpConfig = buildSubAgentMcpConfig({
+    parentAgentRunId: run.id,
+    cardId: card.id,
+    worktreeId: worktree.id,
+    cwd: worktree.fsPath,
+    depth: 1,
+    disallowedTools: designerDisallowedTools,
+  });
+  const result = await runClaudeCliStreamingOnce({
+    cwd: worktree.fsPath,
+    agentRunId: run.id,
+    prompt,
+    permissionMode: "bypassPermissions",
+    disallowedTools: designerDisallowedTools,
+    mcpConfig,
+  });
+  const logsRef = await writeAgentLog(run.id, result.raw);
+
+  await db
+    .update(agentRuns)
+    .set({ status: result.isError ? "failed" : "succeeded", logsRef, finishedAt: new Date() })
+    .where(eq(agentRuns.id, run.id));
+
+  if (!result.isError) {
+    const specBody = extractFencedMarkdown(result.resultText) ?? result.resultText.trim();
+    const specDoc = await createDoc({
+      slug: `design-spec-${card.id}`,
+      title: `Design Spec: ${card.title}`,
+      docType: "wiki",
+      content: specBody,
+      tags: [DESIGN_SPEC_DOC_TAG],
+      message: `designer spec for card ${card.id}`,
+    });
+    await db.insert(cardDocLinks).values({ cardId: card.id, docId: specDoc.id, linkType: "spec" });
+  }
+
+  return {
+    agentRunId: run.id,
+    isError: result.isError,
+    resultText: result.resultText,
+    costUsd: result.totalCostUsd,
+    logsRef,
+  };
+}
+
+// Runs alongside the reviewer at in_review, against the same diff. Read-only
+// like the reviewer, plus Bash disallowed — this is static analysis of the
+// diff, it never needs to execute anything. Returns the same VERDICT:
+// PASS/FAIL convention as the reviewer, recorded as the design_review gate.
+export async function runDesignerReviewAgent(card: Card): Promise<ReviewerRunResult> {
+  const worktree = await getActiveWorktree(card.id);
+  if (!worktree) throw new Error(`no active worktree for card ${card.id}`);
+
+  const roleId = await getRoleId("designer");
+  const diff = await getRepoDiff(worktree.fsPath, worktree.baseCommitSha);
+  const specDocs = await loadLinkedSpecDocs(card);
+  const prompt = buildDesignerReviewPrompt(card, diff, specDocs);
+
+  const [run] = await db
+    .insert(agentRuns)
+    .values({ cardId: card.id, agentRoleId: roleId, worktreeId: worktree.id, status: "verifying", startedAt: new Date() })
+    .returning();
+  if (!run) throw new Error("failed to insert agent_runs row");
+
+  const designerDisallowedTools = ["Edit", "Write", "NotebookEdit", "Bash"];
+  const mcpConfig = buildSubAgentMcpConfig({
+    parentAgentRunId: run.id,
+    cardId: card.id,
+    worktreeId: worktree.id,
+    cwd: worktree.fsPath,
+    depth: 1,
+    disallowedTools: designerDisallowedTools,
+  });
+  const result = await runClaudeCliStreamingOnce({
+    cwd: worktree.fsPath,
+    agentRunId: run.id,
+    prompt,
+    permissionMode: "bypassPermissions",
+    disallowedTools: designerDisallowedTools,
+    mcpConfig,
+  });
+  const logsRef = await writeAgentLog(run.id, result.raw);
+
+  const verdictMatch = result.resultText.match(/VERDICT:\s*(PASS|FAIL)/i);
+  const verdict: "pass" | "fail" = !result.isError && verdictMatch?.[1]?.toUpperCase() === "PASS" ? "pass" : "fail";
 
   await db
     .update(agentRuns)
