@@ -8,5 +8,6 @@ dist/
 data/wiki-repo/
 data/worktrees/
 data/agent-logs/
+**/data/agent-logs/
 tmp-scripts/
 .claude/

@@ -151,6 +151,8 @@ export interface CardActiveRun {
    * survives process restarts.
    */
   live: boolean;
+  /** One-line "what's it doing right now" (last tool call or reasoning excerpt), null when not live or nothing renderable seen yet. */
+  snippet: string | null;
 }
 
 export interface CardWithStatus extends Card {

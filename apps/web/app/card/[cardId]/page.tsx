@@ -1,12 +1,14 @@
 "use client";
 
-import { use, useEffect, useMemo, useState } from "react";
+import { Fragment, use, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Badge,
   Button,
+  cn,
   Dialog,
+  getStatusMeta,
   Input,
   LiveIndicator,
   StatusBadge,
@@ -20,8 +22,17 @@ import {
   buildAgentRunTree,
   flattenAgentRunTree,
 } from "@loopeng/ui";
+import type { GateResultStatus } from "@loopeng/shared";
 import { api, type CardDetailAgentRun } from "../../../lib/api";
 import { AgentSessionPanel } from "./AgentSessionPanel";
+
+// A gate's `detail` blob (failure reasons, stderr tails, criteria breakdowns,
+// etc.) is only worth surfacing eagerly when the gate didn't pass — mirror
+// the same destructive-tone check StatusBadge uses so any current or future
+// failure-like status (not just the literal "failed") auto-expands.
+function isFailureLikeStatus(status: string): boolean {
+  return getStatusMeta(status as GateResultStatus).tone === "destructive";
+}
 
 interface TimelineRow {
   at: Date;
@@ -340,15 +351,43 @@ export default function CardDetailPage({ params }: { params: Promise<{ cardId: s
             </TableRow>
           </TableHeader>
           <TableBody>
-            {card.gateResults.map((gate) => (
-              <TableRow key={gate.id}>
-                <TableCell>{gate.name}</TableCell>
-                <TableCell>
-                  <StatusBadge status={gate.status as import("@loopeng/shared").GateResultStatus} />
-                </TableCell>
-                <TableCell>{new Date(gate.createdAt).toLocaleString()}</TableCell>
-              </TableRow>
-            ))}
+            {card.gateResults.map((gate) => {
+              const isFailure = isFailureLikeStatus(gate.status);
+              const hasDetail = gate.detail && Object.keys(gate.detail).length > 0;
+              return (
+                <Fragment key={gate.id}>
+                  <TableRow>
+                    <TableCell>{gate.name}</TableCell>
+                    <TableCell>
+                      <StatusBadge status={gate.status as GateResultStatus} />
+                    </TableCell>
+                    <TableCell>{new Date(gate.createdAt).toLocaleString()}</TableCell>
+                  </TableRow>
+                  {hasDetail && (
+                    <TableRow>
+                      <TableCell colSpan={3} className="pt-0">
+                        <details
+                          className={cn("rounded-md border bg-muted/40 px-2.5 py-1.5", isFailure && "border-destructive/50")}
+                          open={isFailure}
+                        >
+                          <summary
+                            className={cn(
+                              "cursor-pointer select-none text-[11px] font-medium",
+                              isFailure ? "text-destructive" : "text-muted-foreground",
+                            )}
+                          >
+                            detail
+                          </summary>
+                          <pre className="mt-1.5 max-h-64 overflow-auto whitespace-pre-wrap break-all text-[11px]">
+                            {JSON.stringify(gate.detail, null, 2)}
+                          </pre>
+                        </details>
+                      </TableCell>
+                    </TableRow>
+                  )}
+                </Fragment>
+              );
+            })}
           </TableBody>
         </Table>
       )}

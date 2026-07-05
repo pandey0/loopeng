@@ -304,3 +304,41 @@ class SessionRegistry {
 }
 
 export const sessionRegistry = new SessionRegistry();
+
+// Cheap one-line "what's it doing right now" for the board tile — a much
+// smaller ask than the full AgentSessionPanel transcript, so it scans
+// backwards for the most recent renderable bit rather than reusing
+// toChatItems (packages/ui, DOM-adjacent and not a dependency of the agents
+// package) and truncates hard since this is a tile-width hint, not a reader.
+const SNIPPET_MAX_CHARS = 120;
+
+function truncate(text: string): string {
+  const trimmed = text.trim().replace(/\s+/g, " ");
+  return trimmed.length > SNIPPET_MAX_CHARS ? `${trimmed.slice(0, SNIPPET_MAX_CHARS - 1)}…` : trimmed;
+}
+
+export function extractLatestSnippet(transcript: StreamEvent[]): string | null {
+  for (let i = transcript.length - 1; i >= 0; i--) {
+    const event = transcript[i];
+    if (!event) continue;
+    const message = event.message as { content?: unknown } | undefined;
+    const blocks = Array.isArray(message?.content) ? (message.content as Record<string, unknown>[]) : [];
+    for (let j = blocks.length - 1; j >= 0; j--) {
+      const block = blocks[j];
+      if (!block) continue;
+      if (block.type === "text" && typeof block.text === "string" && block.text.trim()) {
+        return truncate(block.text);
+      }
+      if (block.type === "tool_use" && typeof block.name === "string") {
+        return truncate(`using ${block.name}`);
+      }
+    }
+  }
+  return null;
+}
+
+export function getSessionSnippet(agentRunId: string): string | null {
+  const session = sessionRegistry.get(agentRunId);
+  if (!session) return null;
+  return extractLatestSnippet(session.getTranscript());
+}

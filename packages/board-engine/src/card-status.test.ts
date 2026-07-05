@@ -131,7 +131,13 @@ describe("buildActiveAgentRunMap", () => {
     ];
 
     const result = buildActiveAgentRunMap(rows);
-    expect(result.get("card-1")).toEqual({ agentRunId: "run-2", roleName: "reviewer", status: "verifying", live: false });
+    expect(result.get("card-1")).toEqual({
+      agentRunId: "run-2",
+      roleName: "reviewer",
+      status: "verifying",
+      live: false,
+      snippet: null,
+    });
   });
 
   it("excludes cards whose most recent run already finished", () => {
@@ -146,7 +152,13 @@ describe("buildActiveAgentRunMap", () => {
   it("defaults a null role name through unchanged", () => {
     const rows: ActiveRunRow[] = [{ id: "run-1", cardId: "card-1", roleName: null, status: "running", startedAt: new Date() }];
     const result = buildActiveAgentRunMap(rows);
-    expect(result.get("card-1")).toEqual({ agentRunId: "run-1", roleName: null, status: "running", live: false });
+    expect(result.get("card-1")).toEqual({
+      agentRunId: "run-1",
+      roleName: null,
+      status: "running",
+      live: false,
+      snippet: null,
+    });
   });
 
   it("marks a run live when the injected registry check recognizes its id", () => {

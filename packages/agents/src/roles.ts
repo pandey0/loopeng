@@ -155,6 +155,12 @@ export async function runImplementerAgent(card: Card, priorFailureNote?: string)
 
 export interface PlannerRunResult extends AgentRunResult, PersistedDecomposition {}
 
+export interface PlannerRunHandle {
+  agentRunId: string;
+  /** Resolves/rejects once the CLI call, output parsing, and board persistence finish. */
+  result: Promise<PlannerRunResult>;
+}
+
 // Turns a freeform product-owner request into a boarded epic + child cards.
 // Unlike the implementer/reviewer, the planner has no card or worktree yet —
 // it runs read-only against the main repo checkout (for codebase context)
@@ -163,7 +169,12 @@ export interface PlannerRunResult extends AgentRunResult, PersistedDecomposition
 // persisted with every card left in "backlog" — this is an intake tool, not
 // an auto-approval bypass, so a human reviews and moves cards to "ready"
 // themselves before dispatch.
-export async function runPlannerAgent(boardId: string, requestText: string): Promise<PlannerRunResult> {
+//
+// Split into two halves so an HTTP caller can hand back agentRunId (and let
+// the frontend attach a live AgentSessionPanel) as soon as the agent_runs row
+// exists, instead of blocking the whole request on the CLI call + parsing +
+// persistence, which can take tens of seconds.
+export async function startPlannerAgent(boardId: string, requestText: string): Promise<PlannerRunHandle> {
   const roleId = await getRoleId("planner");
   const existingCards = await db.select({ title: cards.title }).from(cards).where(eq(cards.boardId, boardId));
   const prompt = buildPlannerPrompt(
@@ -177,9 +188,13 @@ export async function runPlannerAgent(boardId: string, requestText: string): Pro
     .returning();
   if (!run) throw new Error("failed to insert agent_runs row");
 
+  return { agentRunId: run.id, result: executePlannerAgent(boardId, run.id, prompt) };
+}
+
+async function executePlannerAgent(boardId: string, runId: string, prompt: string): Promise<PlannerRunResult> {
   const plannerDisallowedTools = ["Edit", "Write", "NotebookEdit", "Bash"];
   const mcpConfig = buildSubAgentMcpConfig({
-    parentAgentRunId: run.id,
+    parentAgentRunId: runId,
     cardId: null,
     worktreeId: null,
     cwd: resolveRepoRoot(),
@@ -188,16 +203,16 @@ export async function runPlannerAgent(boardId: string, requestText: string): Pro
   });
   const result = await runClaudeCliStreamingOnce({
     cwd: resolveRepoRoot(),
-    agentRunId: run.id,
+    agentRunId: runId,
     prompt,
     permissionMode: "bypassPermissions",
     disallowedTools: plannerDisallowedTools,
     mcpConfig,
   });
-  const logsRef = await writeAgentLog(run.id, result.raw);
+  const logsRef = await writeAgentLog(runId, result.raw);
 
   if (result.isError) {
-    await db.update(agentRuns).set({ status: "failed", logsRef, finishedAt: new Date() }).where(eq(agentRuns.id, run.id));
+    await db.update(agentRuns).set({ status: "failed", logsRef, finishedAt: new Date() }).where(eq(agentRuns.id, runId));
     throw new PlannerOutputError(`planner agent run failed: ${result.resultText.slice(0, 2000)}`);
   }
 
@@ -206,20 +221,27 @@ export async function runPlannerAgent(boardId: string, requestText: string): Pro
     const parsed = parsePlannerOutput(result.resultText);
     persisted = await persistDecomposition(boardId, parsed);
   } catch (err) {
-    await db.update(agentRuns).set({ status: "failed", logsRef, finishedAt: new Date() }).where(eq(agentRuns.id, run.id));
+    await db.update(agentRuns).set({ status: "failed", logsRef, finishedAt: new Date() }).where(eq(agentRuns.id, runId));
     throw err;
   }
 
-  await db.update(agentRuns).set({ status: "succeeded", logsRef, finishedAt: new Date() }).where(eq(agentRuns.id, run.id));
+  await db.update(agentRuns).set({ status: "succeeded", logsRef, finishedAt: new Date() }).where(eq(agentRuns.id, runId));
 
   return {
-    agentRunId: run.id,
+    agentRunId: runId,
     isError: false,
     resultText: result.resultText,
     costUsd: result.totalCostUsd,
     logsRef,
     ...persisted,
   };
+}
+
+// Convenience wrapper kept for callers that want the old blocking behavior
+// (e.g. scripts, tests) — awaits the entire run instead of just kicking it off.
+export async function runPlannerAgent(boardId: string, requestText: string): Promise<PlannerRunResult> {
+  const { result } = await startPlannerAgent(boardId, requestText);
+  return result;
 }
 
 export async function runReviewerAgent(card: Card): Promise<ReviewerRunResult> {

@@ -70,6 +70,18 @@ export interface IntakeResult {
   specDocId: string;
 }
 
+export interface IntakeStartResult {
+  agentRunId: string;
+}
+
+// Poll target for a background planner run (see the intake route): "running"
+// until the CLI call + output parsing + board persistence finish, then a
+// terminal succeeded/failed outcome.
+export type IntakeStatus =
+  | { status: "running" }
+  | { status: "succeeded"; result: IntakeResult }
+  | { status: "failed"; error: string; code?: "planner_output_invalid" };
+
 export interface CardDetail extends Card {
   dependsOn: CardDependency[];
   dependents: CardDependency[];
@@ -126,7 +138,9 @@ export const api = {
   createBoard: (input: { name: string; description?: string }) =>
     request<Board>("/boards", { method: "POST", body: JSON.stringify(input) }),
   intake: (boardId: string, requestText: string) =>
-    request<IntakeResult>(`/boards/${boardId}/intake`, { method: "POST", body: JSON.stringify({ requestText }) }),
+    request<IntakeStartResult>(`/boards/${boardId}/intake`, { method: "POST", body: JSON.stringify({ requestText }) }),
+  getIntakeStatus: (boardId: string, agentRunId: string) =>
+    request<IntakeStatus>(`/boards/${boardId}/intake/${agentRunId}`),
 
   listCards: (boardId?: string) =>
     request<CardWithStatus[]>(`/cards${boardId ? `?boardId=${boardId}` : ""}`),
@@ -144,6 +158,7 @@ export const api = {
       body: JSON.stringify({ toState, actorType: "user" }),
     }),
   getCardDetail: (id: string) => request<CardDetail>(`/cards/${id}/detail`),
+  getCardDiff: (id: string) => request<{ diff: string }>(`/cards/${id}/diff`),
   updateCard: (
     id: string,
     input: Partial<{

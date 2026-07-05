@@ -13,6 +13,7 @@ export interface ColumnProps {
   cards: CardWithStatus[];
   onDropCard?: (cardId: string, toState: CardState) => void;
   onCardClick?: (card: CardWithStatus) => void;
+  onCardWatchClick?: (card: CardWithStatus) => void;
   renderCardFooter?: (card: CardWithStatus) => ReactNode;
   draggingCardState?: CardState | null;
   onCardDragStart?: (card: CardWithStatus) => void;
@@ -30,6 +31,7 @@ export function Column({
   cards,
   onDropCard,
   onCardClick,
+  onCardWatchClick,
   renderCardFooter,
   draggingCardState,
   onCardDragStart,
@@ -77,7 +79,13 @@ export function Column({
           }}
           onDragEnd={() => onCardDragEnd?.()}
         >
-          <CardTile card={card} onClick={onCardClick} draggable={false} highlighted={highlightedCardIds?.has(card.id)} />
+          <CardTile
+            card={card}
+            onClick={onCardClick}
+            onWatchClick={onCardWatchClick}
+            draggable={false}
+            highlighted={highlightedCardIds?.has(card.id)}
+          />
           {renderCardFooter?.(card)}
         </div>
       ))}

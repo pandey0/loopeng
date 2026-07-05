@@ -23,9 +23,11 @@ export interface CardTileProps {
   highlighted?: boolean;
   onDragStart?: (card: CardWithStatus) => void;
   onClick?: (card: CardWithStatus) => void;
+  /** Opens a live session view for the card's active run without navigating off the board — only shown when a live session is actually attachable. */
+  onWatchClick?: (card: CardWithStatus) => void;
 }
 
-export function CardTile({ card, draggable = true, highlighted = false, onDragStart, onClick }: CardTileProps) {
+export function CardTile({ card, draggable = true, highlighted = false, onDragStart, onClick, onWatchClick }: CardTileProps) {
   const status = getStatusMeta(card.state);
   const activeAgentRun = card.activeAgentRun ?? null;
   const isActive = activeAgentRun !== null;
@@ -65,13 +67,32 @@ export function CardTile({ card, draggable = true, highlighted = false, onDragSt
         </div>
       )}
       {isActive && (
-        <div className="mt-1.5 flex items-center gap-1.5 text-[11px] font-medium text-primary">
-          <span className="relative flex h-2 w-2 shrink-0">
-            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-primary opacity-75" />
-            <span className="relative inline-flex h-2 w-2 rounded-full bg-primary" />
-          </span>
-          {activeAgentRun?.roleName ?? "agent"} {activeAgentRun?.status}
-          {activeAgentRun?.live && <LiveIndicator className="ml-1" />}
+        <div className="mt-1.5">
+          <div className="flex items-center gap-1.5 text-[11px] font-medium text-primary">
+            <span className="relative flex h-2 w-2 shrink-0">
+              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-primary opacity-75" />
+              <span className="relative inline-flex h-2 w-2 rounded-full bg-primary" />
+            </span>
+            {activeAgentRun?.roleName ?? "agent"} {activeAgentRun?.status}
+            {activeAgentRun?.live && <LiveIndicator className="ml-1" />}
+            {onWatchClick && activeAgentRun?.live && (
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onWatchClick(card);
+                }}
+                className="ml-auto text-[10px] font-normal text-muted-foreground underline hover:text-foreground"
+              >
+                watch
+              </button>
+            )}
+          </div>
+          {activeAgentRun?.snippet && (
+            <div className="mt-0.5 truncate text-[11px] italic text-muted-foreground" title={activeAgentRun.snippet}>
+              {activeAgentRun.snippet}
+            </div>
+          )}
         </div>
       )}
     </div>

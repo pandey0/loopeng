@@ -1,10 +1,11 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Badge, Button, Dialog, Textarea } from "@loopeng/ui";
 import type { Card } from "@loopeng/shared";
 import { api, ApiError, type IntakeResult } from "../../lib/api";
+import { AgentSessionPanel } from "../card/[cardId]/AgentSessionPanel";
 
 export interface IntakeModalProps {
   boardId: string;
@@ -14,10 +15,15 @@ export interface IntakeModalProps {
 
 type Phase = "form" | "running" | "error" | "success";
 
+// How often to poll for the background planner run's outcome while the live
+// AgentSessionPanel socket is open (see api.getIntakeStatus).
+const INTAKE_POLL_INTERVAL_MS = 2000;
+
 export function IntakeModal({ boardId, open, onClose }: IntakeModalProps) {
   const router = useRouter();
   const [requestText, setRequestText] = useState("");
   const [phase, setPhase] = useState<Phase>("form");
+  const [agentRunId, setAgentRunId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<IntakeResult | null>(null);
   const [previewCards, setPreviewCards] = useState<Card[]>([]);
@@ -25,6 +31,7 @@ export function IntakeModal({ boardId, open, onClose }: IntakeModalProps) {
   function reset() {
     setRequestText("");
     setPhase("form");
+    setAgentRunId(null);
     setError(null);
     setResult(null);
     setPreviewCards([]);
@@ -40,17 +47,52 @@ export function IntakeModal({ boardId, open, onClose }: IntakeModalProps) {
     setPhase("running");
     setError(null);
     try {
-      const intakeResult = await api.intake(boardId, requestText.trim());
-      const allIds = new Set([intakeResult.epicCardId, ...intakeResult.cardIds]);
-      const boardCards = await api.listCards(boardId);
-      setPreviewCards(boardCards.filter((c) => allIds.has(c.id)));
-      setResult(intakeResult);
-      setPhase("success");
+      const { agentRunId: id } = await api.intake(boardId, requestText.trim());
+      setAgentRunId(id);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : (err as Error).message);
       setPhase("error");
     }
   }
+
+  // Polls the background planner run started by handleSubmit for its
+  // terminal outcome — the POST only hands back agentRunId immediately, so
+  // this is what actually transitions "running" to "success"/"error". The
+  // AgentSessionPanel rendered below streams the live reasoning over its own
+  // WebSocket independently of this poll.
+  useEffect(() => {
+    if (phase !== "running" || !agentRunId) return;
+    let cancelled = false;
+
+    async function poll() {
+      try {
+        const status = await api.getIntakeStatus(boardId, agentRunId!);
+        if (cancelled || status.status === "running") return;
+        if (status.status === "succeeded") {
+          const allIds = new Set([status.result.epicCardId, ...status.result.cardIds]);
+          const boardCards = await api.listCards(boardId);
+          if (cancelled) return;
+          setPreviewCards(boardCards.filter((c) => allIds.has(c.id)));
+          setResult(status.result);
+          setPhase("success");
+        } else {
+          setError(status.error);
+          setPhase("error");
+        }
+      } catch (err) {
+        if (cancelled) return;
+        setError(err instanceof ApiError ? err.message : (err as Error).message);
+        setPhase("error");
+      }
+    }
+
+    void poll();
+    const interval = setInterval(poll, INTAKE_POLL_INTERVAL_MS);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [phase, agentRunId, boardId]);
 
   function handleViewOnBoard() {
     if (!result) return;
@@ -91,9 +133,17 @@ export function IntakeModal({ boardId, open, onClose }: IntakeModalProps) {
           </div>
         </div>
       ) : phase === "running" ? (
-        <div className="flex flex-col items-center gap-3 py-8 text-sm text-muted-foreground">
-          <span className="h-6 w-6 animate-spin rounded-full border-2 border-primary border-t-transparent" />
-          Planner agent is decomposing this request into cards — this can take tens of seconds.
+        <div className="flex flex-col gap-3">
+          <p className="text-sm text-muted-foreground">
+            Planner agent is decomposing this request into cards — this can take tens of seconds.
+          </p>
+          {agentRunId ? (
+            <AgentSessionPanel agentRunId={agentRunId} roleName="planner" live />
+          ) : (
+            <div className="flex flex-col items-center gap-3 py-8 text-sm text-muted-foreground">
+              <span className="h-6 w-6 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+            </div>
+          )}
         </div>
       ) : (
         <div>

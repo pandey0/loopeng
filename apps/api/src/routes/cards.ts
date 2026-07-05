@@ -1,7 +1,8 @@
 import type { FastifyPluginAsync } from "fastify";
 import { and, desc, eq } from "drizzle-orm";
 import { applyTransition, attachCardStatus, wouldCreateCycle } from "@loopeng/board-engine";
-import { sessionRegistry } from "@loopeng/agents";
+import { getSessionSnippet, sessionRegistry } from "@loopeng/agents";
+import { getActiveWorktree, getRepoDiff } from "@loopeng/worktree-manager";
 import {
   agentRoles,
   agentRuns,
@@ -33,7 +34,7 @@ export const cardRoutes: FastifyPluginAsync = async (fastify) => {
     const cardRows = boardId
       ? await fastify.db.select().from(cards).where(eq(cards.boardId, boardId))
       : await fastify.db.select().from(cards);
-    return attachCardStatus(cardRows, { isRunLive });
+    return attachCardStatus(cardRows, { isRunLive, getSnippet: getSessionSnippet });
   });
 
   fastify.post("/cards", async (request, reply) => {
@@ -133,6 +134,21 @@ export const cardRoutes: FastifyPluginAsync = async (fastify) => {
       events,
       questions,
     };
+  });
+
+  // Lets a human reviewing an awaiting_approval card see the actual diff
+  // instead of approving blind -- the same diff the reviewer agent judged,
+  // via getRepoDiff/getActiveWorktree already used to build the reviewer's
+  // own prompt (packages/agents/src/roles.ts runReviewerAgent).
+  fastify.get("/cards/:id/diff", async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const worktree = await getActiveWorktree(id);
+    if (!worktree) {
+      reply.status(404).send({ error: "not_found", message: "no active worktree for this card" });
+      return;
+    }
+    const diff = await getRepoDiff(worktree.fsPath, worktree.baseCommitSha);
+    return { diff };
   });
 
   fastify.post("/cards/:id/transition", async (request, reply) => {

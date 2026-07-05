@@ -149,9 +149,21 @@ export interface ActiveRunRow {
  */
 export type IsRunLive = (agentRunId: string) => boolean;
 
+/**
+ * Answers "what's this live run doing right now?" (last tool call or
+ * reasoning excerpt). Injected for the same reason as IsRunLive — the API
+ * passes card C's session registry through rather than board-engine
+ * depending on @loopeng/agents.
+ */
+export type GetRunSnippet = (agentRunId: string) => string | null;
+
 // Pure: rows must already be sorted by startedAt DESC, so the first
 // running/verifying row seen per card is the most recent one.
-export function buildActiveAgentRunMap(rows: ActiveRunRow[], isRunLive?: IsRunLive): Map<string, CardActiveRun> {
+export function buildActiveAgentRunMap(
+  rows: ActiveRunRow[],
+  isRunLive?: IsRunLive,
+  getSnippet?: GetRunSnippet,
+): Map<string, CardActiveRun> {
   const result = new Map<string, CardActiveRun>();
   for (const row of rows) {
     if (!row.cardId || result.has(row.cardId)) continue;
@@ -161,12 +173,17 @@ export function buildActiveAgentRunMap(rows: ActiveRunRow[], isRunLive?: IsRunLi
       roleName: row.roleName,
       status: row.status as CardActiveRun["status"],
       live: isRunLive?.(row.id) ?? false,
+      snippet: getSnippet?.(row.id) ?? null,
     });
   }
   return result;
 }
 
-async function computeActiveAgentRuns(cardIds: string[], isRunLive?: IsRunLive): Promise<Map<string, CardActiveRun>> {
+async function computeActiveAgentRuns(
+  cardIds: string[],
+  isRunLive?: IsRunLive,
+  getSnippet?: GetRunSnippet,
+): Promise<Map<string, CardActiveRun>> {
   if (cardIds.length === 0) return new Map();
 
   const rows = await db
@@ -182,7 +199,7 @@ async function computeActiveAgentRuns(cardIds: string[], isRunLive?: IsRunLive):
     .where(inArray(agentRuns.cardId, cardIds))
     .orderBy(desc(agentRuns.startedAt));
 
-  return buildActiveAgentRunMap(rows, isRunLive);
+  return buildActiveAgentRunMap(rows, isRunLive, getSnippet);
 }
 
 /**
@@ -198,7 +215,7 @@ async function computeActiveAgentRuns(cardIds: string[], isRunLive?: IsRunLive):
  */
 export async function attachCardStatus<T extends { id: string; state: string }>(
   cardRows: T[],
-  options?: { isRunLive?: IsRunLive },
+  options?: { isRunLive?: IsRunLive; getSnippet?: GetRunSnippet },
 ): Promise<(T & Pick<CardWithStatus, "blockedReason" | "activeAgentRun">)[]> {
   const blockedCardIds = cardRows.filter((c) => c.state === "blocked").map((c) => c.id);
   const activeCandidateIds = cardRows
@@ -207,7 +224,7 @@ export async function attachCardStatus<T extends { id: string; state: string }>(
 
   const [blockedReasons, activeRuns] = await Promise.all([
     computeBlockedReasons(blockedCardIds),
-    computeActiveAgentRuns(activeCandidateIds, options?.isRunLive),
+    computeActiveAgentRuns(activeCandidateIds, options?.isRunLive, options?.getSnippet),
   ]);
 
   return cardRows.map((card) => ({

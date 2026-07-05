@@ -4,13 +4,20 @@ import { Suspense, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Column, Button } from "@loopeng/ui";
+import { Column, Button, Dialog } from "@loopeng/ui";
 import type { CardState, CardWithStatus } from "@loopeng/shared";
 import { api } from "../../lib/api";
 import { useBoard } from "../providers/BoardProvider";
 import { ActivityFeed } from "./ActivityFeed";
+import { ApprovalDialog } from "./ApprovalDialog";
+import { AgentSessionPanel } from "../card/[cardId]/AgentSessionPanel";
 
 const HIGHLIGHT_DURATION_MS = 4000;
+// While anything is actively running, poll listCards so the board tile's
+// live snippet (packages/agents session snippet) updates without needing a
+// per-tile WebSocket -- cheap compared to that, and the existing SSE event
+// stream is for state-transition events, not a token-level firehose.
+const ACTIVE_RUN_POLL_MS = 4000;
 
 // Phase 3 orchestrator now runs the full gate pipeline at gate_checks and
 // routes by risk_tier: high stops at awaiting_approval for a human click,
@@ -43,12 +50,15 @@ function BoardPageInner() {
   const { boardId, boards, boardsLoading } = useBoard();
   const [draggingCard, setDraggingCard] = useState<CardWithStatus | null>(null);
   const [highlightIds, setHighlightIds] = useState<Set<string>>(new Set());
+  const [approvalCardId, setApprovalCardId] = useState<string | null>(null);
+  const [watchCard, setWatchCard] = useState<CardWithStatus | null>(null);
   const cardEls = useRef<Map<string, HTMLDivElement>>(new Map());
 
   const cardsQuery = useQuery({
     queryKey: ["cards", boardId],
     queryFn: () => api.listCards(boardId!),
     enabled: !!boardId,
+    refetchInterval: (query) => (query.state.data?.some((c) => c.activeAgentRun) ? ACTIVE_RUN_POLL_MS : false),
   });
 
   // Lands here from the intake modal's "View on board" action
@@ -124,6 +134,7 @@ function BoardPageInner() {
               cards={byState(state)}
               onDropCard={handleDrop}
               onCardClick={(card) => router.push(`/card/${card.id}`)}
+              onCardWatchClick={setWatchCard}
               draggingCardState={draggingCard?.state}
               onCardDragStart={setDraggingCard}
               onCardDragEnd={() => setDraggingCard(null)}
@@ -135,8 +146,12 @@ function BoardPageInner() {
               renderCardFooter={
                 state === "awaiting_approval"
                   ? (card) => (
-                      <Button size="sm" onClick={() => handleApprove(card.id)} className="-mt-1 mb-2 h-auto px-2 py-1 text-[11px]">
-                        Approve → Deploy
+                      <Button
+                        size="sm"
+                        onClick={() => setApprovalCardId(card.id)}
+                        className="-mt-1 mb-2 h-auto px-2 py-1 text-[11px]"
+                      >
+                        Review & Approve
                       </Button>
                     )
                   : state === "blocked"
@@ -157,6 +172,26 @@ function BoardPageInner() {
         </div>
         <ActivityFeed boardId={boardId} />
       </div>
+      <ApprovalDialog
+        cardId={approvalCardId}
+        onClose={() => setApprovalCardId(null)}
+        onApprove={(cardId) => handleApprove(cardId)}
+      />
+      {watchCard?.activeAgentRun && (
+        <Dialog
+          open
+          onClose={() => setWatchCard(null)}
+          title={`Watching — ${watchCard.title}`}
+          description="Live session: new events stream in and you can send messages."
+          className="max-w-2xl"
+        >
+          <AgentSessionPanel
+            agentRunId={watchCard.activeAgentRun.agentRunId}
+            roleName={watchCard.activeAgentRun.roleName}
+            live={watchCard.activeAgentRun.live}
+          />
+        </Dialog>
+      )}
     </div>
   );
 }
