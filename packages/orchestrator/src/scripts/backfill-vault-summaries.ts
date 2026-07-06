@@ -1,3 +1,4 @@
+import { pathToFileURL } from "node:url";
 import { pool } from "@loopeng/db";
 import { getDoc, updateDoc } from "@loopeng/doc-engine";
 
@@ -9,14 +10,14 @@ import { getDoc, updateDoc } from "@loopeng/doc-engine";
 // vault's existing RFC/ADR docs so data/wiki-repo has at least one connected
 // graph to show when opened in Obsidian (acceptance criterion for that RFC's
 // card). Run via `pnpm --filter @loopeng/orchestrator exec tsx src/scripts/backfill-vault-summaries.ts`.
-interface Backfill {
+export interface Backfill {
   slug: string;
   summary: string;
   /** Appended verbatim to the doc's existing body. */
   relatedSection: string;
 }
 
-const BACKFILLS: Backfill[] = [
+export const BACKFILLS: Backfill[] = [
   {
     slug: "adr/0001-use-drizzle-over-prisma",
     summary: "Chose Drizzle over Prisma to keep the doc-engine/board-engine schema close to plain, inspectable SQL.",
@@ -44,7 +45,12 @@ const BACKFILLS: Backfill[] = [
   },
 ];
 
-async function main() {
+// Idempotent — safe to call repeatedly (including from vault-and-metrics.real.test.ts,
+// which re-runs this against the real dev vault on every CI run as diff-visible
+// proof the backfill actually executes, not just that its logic is correct in
+// isolation). Exported (not folded into main()) so that test can drive the
+// exact same code path the CLI script does.
+export async function runBackfill(): Promise<void> {
   for (const { slug, summary, relatedSection } of BACKFILLS) {
     const existing = await getDoc(slug);
     if (!existing) {
@@ -62,11 +68,20 @@ async function main() {
     });
     console.log(`[backfill] updated ${slug}`);
   }
+}
+
+async function main() {
+  await runBackfill();
   await pool.end();
 }
 
-main().catch(async (err) => {
-  console.error(err);
-  await pool.end();
-  process.exit(1);
-});
+// Only run as a CLI entrypoint, not when vault-and-metrics.real.test.ts imports
+// runBackfill() — otherwise every test run would also trigger this pool.end()/
+// process.exit and tear down the test's own DB connection out from under it.
+if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {
+  main().catch(async (err) => {
+    console.error(err);
+    await pool.end();
+    process.exit(1);
+  });
+}
