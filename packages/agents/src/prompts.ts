@@ -107,7 +107,14 @@ export function buildImplementerPrompt(
   ].join("\n");
 }
 
-export function buildPlannerPrompt(requestText: string, existingCardTitles: string[] = []): string {
+export function buildPlannerPrompt(
+  requestText: string,
+  existingCardTitles: string[] = [],
+  specDocs: SpecDocContext[] = [],
+  skills: SkillContext[] = [],
+): string {
+  const skillsBlock = skills.length ? skills.map(formatDocSummaryLine).join("\n") : "(no relevant skill docs found)";
+
   return [
     "You are the planner (PM) agent on an internal dev-team platform. A product owner has sent",
     "a freeform request. Your job is to turn it into a spec doc and a decomposition into an epic",
@@ -120,6 +127,14 @@ export function buildPlannerPrompt(requestText: string, existingCardTitles: stri
     "",
     "## Existing open cards on this board (avoid duplicating work already tracked)",
     existingCardTitles.length ? existingCardTitles.map((t) => `- ${t}`).join("\n") : "(none)",
+    "",
+    "## Existing spec docs (RFCs/ADRs — check before proposing conflicting decisions)",
+    formatSpecDocsBlock(specDocs),
+    "",
+    "## Existing skill docs",
+    skillsBlock,
+    "",
+    GET_DOC_CONVENTION,
     "",
     "## Output format",
     "Respond with exactly two fenced blocks, in this order, and nothing else outside them.",

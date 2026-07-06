@@ -160,6 +160,26 @@ describe("buildPlannerPrompt", () => {
     const prompt = buildPlannerPrompt("Add SSO login", []);
     expect(prompt).toContain("(none)");
   });
+
+  it("includes existing spec docs and skill docs as slug + one-line summary, not full body", () => {
+    const prompt = buildPlannerPrompt("Add SSO login", [], [
+      { slug: "auth-rfc", title: "Auth RFC", summary: "Describes the SSO federation approach." },
+    ], [
+      { slug: "retry-etiquette", title: "Retry Etiquette", summary: "Keep retries idempotent." },
+    ]);
+    expect(prompt).toContain("## Existing spec docs");
+    expect(prompt).toContain("`auth-rfc`");
+    expect(prompt).toContain("Describes the SSO federation approach.");
+    expect(prompt).toContain("## Existing skill docs");
+    expect(prompt).toContain("`retry-etiquette`");
+    expect(prompt).toContain("get_doc");
+  });
+
+  it("notes when there are no spec/skill docs", () => {
+    const prompt = buildPlannerPrompt("Add SSO login", []);
+    expect(prompt).toContain("(no linked spec docs found)");
+    expect(prompt).toContain("(no relevant skill docs found)");
+  });
 });
 
 describe("buildReviewerPrompt", () => {

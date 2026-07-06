@@ -79,6 +79,20 @@ async function loadLinkedSpecDocs(card: Card): Promise<SpecDocContext[]> {
   return linkedRows.map((row) => ({ slug: row.docs.slug, title: row.docs.title, summary: row.docs.summary }));
 }
 
+// The planner has no card yet (it's what produces one), so there's nothing to
+// filter doc relevance by tags/links — it gets every existing RFC/ADR and
+// skill doc as slug + one-line summary instead, same lazy get_doc contract as
+// the other roles, so it can spot prior decisions before proposing new ones.
+async function loadAllSpecDocs(): Promise<SpecDocContext[]> {
+  const [rfcs, adrs] = await Promise.all([listDocs({ docType: "rfc" }), listDocs({ docType: "adr" })]);
+  return [...rfcs, ...adrs].map((doc) => ({ slug: doc.slug, title: doc.title, summary: doc.summary }));
+}
+
+async function loadAllSkillDocs(): Promise<SkillContext[]> {
+  const skillDocs = await listDocs({ docType: "skill" });
+  return skillDocs.map((doc) => ({ slug: doc.slug, title: doc.title, summary: doc.summary }));
+}
+
 export async function getRoleId(name: string): Promise<string> {
   const [role] = await db.select().from(agentRoles).where(eq(agentRoles.name, name));
   if (!role) throw new Error(`agent role not seeded: ${name}`);
@@ -159,9 +173,12 @@ export interface PlannerRunResult extends AgentRunResult, PersistedDecomposition
 export async function runPlannerAgent(boardId: string, requestText: string): Promise<PlannerRunResult> {
   const roleId = await getRoleId("planner");
   const existingCards = await db.select({ title: cards.title }).from(cards).where(eq(cards.boardId, boardId));
+  const [specDocs, skills] = await Promise.all([loadAllSpecDocs(), loadAllSkillDocs()]);
   const prompt = buildPlannerPrompt(
     requestText,
     existingCards.map((c) => c.title),
+    specDocs,
+    skills,
   );
 
   const [run] = await db
