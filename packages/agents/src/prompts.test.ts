@@ -85,6 +85,62 @@ describe("buildImplementerPrompt", () => {
   });
 });
 
+// Deterministic, diff-visible proof for the "measured prompt size for a
+// doc-linked card drops versus the inline-everything baseline" acceptance
+// criterion on rfc/2026-07-obsidian-vault-token-efficiency — same comparison
+// packages/orchestrator/src/scripts/measure-prompt-size.ts records live
+// against the real dev DB/vault, but expressed as a fixture-based unit test
+// so the reduction is asserted on every CI run, not just a one-off script.
+describe("prompt size reduction (doc-linked card, old inline-full-body vs new summary+slug)", () => {
+  function oldStyleSpecDocsBlock(fullDocs: { title: string; body: string }[]): string {
+    return fullDocs.map((d) => `### Spec: ${d.title}\n${d.body}`).join("\n\n");
+  }
+
+  // Representative full ADR/RFC-length body (real linked docs in the vault
+  // run well into the low thousands of characters — see adr/0002 and the
+  // RFC in data/wiki-repo).
+  const fullBody = Array.from(
+    { length: 40 },
+    (_, i) => `Paragraph ${i}: real spec/ADR prose describing context, decision, and consequences in detail.`,
+  ).join("\n\n");
+
+  const fullDocs = [
+    { title: "Doc One", body: fullBody },
+    { title: "Doc Two", body: fullBody },
+    { title: "Doc Three", body: fullBody },
+  ];
+  const summaryDocs = [
+    { slug: "doc-one", title: "Doc One", summary: "One-line summary of doc one." },
+    { slug: "doc-two", title: "Doc Two", summary: "One-line summary of doc two." },
+    { slug: "doc-three", title: "Doc Three", summary: "One-line summary of doc three." },
+  ];
+
+  it("shrinks the spec-docs section of the implementer prompt by a large margin", () => {
+    const oldPrompt = buildImplementerPrompt(card(), [], undefined, []).replace(
+      "(no linked spec docs found)",
+      oldStyleSpecDocsBlock(fullDocs),
+    );
+    const newPrompt = buildImplementerPrompt(card(), [], undefined, summaryDocs);
+
+    expect(newPrompt.length).toBeLessThan(oldPrompt.length);
+    const reductionPct = 1 - newPrompt.length / oldPrompt.length;
+    expect(reductionPct).toBeGreaterThan(0.5);
+  });
+
+  it("shrinks the spec-docs section of the reviewer prompt by a large margin", () => {
+    const diff = "diff --git a/x b/x";
+    const oldPrompt = buildReviewerPrompt(card(), diff, []).replace(
+      "(no linked spec docs found)",
+      oldStyleSpecDocsBlock(fullDocs),
+    );
+    const newPrompt = buildReviewerPrompt(card(), diff, summaryDocs);
+
+    expect(newPrompt.length).toBeLessThan(oldPrompt.length);
+    const reductionPct = 1 - newPrompt.length / oldPrompt.length;
+    expect(reductionPct).toBeGreaterThan(0.5);
+  });
+});
+
 describe("buildPlannerPrompt", () => {
   it("includes the product owner request and json schema fields", () => {
     const prompt = buildPlannerPrompt("Add SSO login for enterprise customers");

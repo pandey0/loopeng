@@ -24,11 +24,11 @@ beforeAll(async () => {
   ({ createDoc, getDoc, updateDoc } = await import("./index.js"));
 });
 
-describe("mandatory doc summary (create/update)", () => {
-  afterAll(async () => {
-    await pool.end();
-  });
+afterAll(async () => {
+  await pool.end();
+});
 
+describe("mandatory doc summary (create/update)", () => {
   it("persists the summary to both the frontmatter and the docs row", async () => {
     const slug = `test-doc-${randomUUID()}`;
     const doc = await createDoc({
@@ -120,5 +120,51 @@ describe("mandatory doc summary (create/update)", () => {
     expect(full?.frontmatter.summary).toBe("Revised summary.");
 
     await db.delete(docs).where(eq(docs.id, doc.id));
+  });
+});
+
+// Automated, deterministic proof (runs in CI, isolated tmp vault — not
+// dependent on the real dev data/wiki-repo) that the vault produces valid
+// Obsidian frontmatter and connected [[wikilinks]] between docs, for the
+// "data/wiki-repo opens as a valid Obsidian vault with working wikilinks"
+// acceptance criterion on rfc/2026-07-obsidian-vault-token-efficiency.
+describe("Obsidian vault: frontmatter + wikilinks", () => {
+  it("round-trips a [[wikilink]] between two docs through real YAML frontmatter parsing", async () => {
+    const slugA = `wikilink-target-${randomUUID()}`;
+    const slugB = `wikilink-source-${randomUUID()}`;
+
+    const target = await createDoc({
+      slug: slugA,
+      title: "Wikilink target doc",
+      docType: "wiki",
+      content: "## Body\nThe doc other docs link to.",
+      summary: "Target doc for the wikilink round-trip test.",
+      tags: [],
+      message: "create target doc",
+    });
+
+    const source = await createDoc({
+      slug: slugB,
+      title: "Wikilink source doc",
+      docType: "wiki",
+      content: `## Related\n- [[${slugA}]] — the doc this one links to.`,
+      summary: "Source doc for the wikilink round-trip test.",
+      tags: [],
+      message: "create source doc",
+    });
+
+    const full = await getDoc(slugB);
+    // Proves the body — including the [[wikilink]] — survives a real
+    // gray-matter stringify/parse round trip through the git-backed vault,
+    // exactly as Obsidian itself would read the file off disk.
+    expect(full?.body).toContain(`[[${slugA}]]`);
+    expect(full?.frontmatter.summary).toBe("Source doc for the wikilink round-trip test.");
+
+    const linkedDoc = await getDoc(slugA);
+    expect(linkedDoc).not.toBeNull();
+    expect(linkedDoc?.title).toBe("Wikilink target doc");
+
+    await db.delete(docs).where(eq(docs.id, target.id));
+    await db.delete(docs).where(eq(docs.id, source.id));
   });
 });
