@@ -63,7 +63,7 @@ describe("buildBlockedReasonMap", () => {
     expect(result.get("card-1")).toBe("implementer failed");
   });
 
-  it("ignores passing gates and non-failing runs, leaving no reason", () => {
+  it("falls back to a generic honest reason when nothing failing explains the block", () => {
     const runRows: FailingRunRow[] = [
       {
         cardId: "card-1",
@@ -76,15 +76,50 @@ describe("buildBlockedReasonMap", () => {
     ];
 
     const result = buildBlockedReasonMap(["card-1"], [], runRows);
-    expect(result.has("card-1")).toBe(false);
+    expect(result.get("card-1")).toBe("blocked with no recorded cause -- check agent run and gate history on the card detail page");
   });
 
-  it("does not leak reasons across cards", () => {
+  it("explains a blocked card whose latest run is stuck running/verifying (orphaned by a process restart)", () => {
+    const runRows: FailingRunRow[] = [
+      {
+        cardId: "card-1",
+        roleName: "implementer",
+        verdict: null,
+        status: "running",
+        startedAt: new Date("2026-01-01T00:00:00Z"),
+        finishedAt: null,
+      },
+    ];
+
+    const result = buildBlockedReasonMap(["card-1"], [], runRows);
+    expect(result.get("card-1")).toBe('implementer run interrupted (stuck in "running" -- likely an API restart mid-run)');
+  });
+
+  it("prefers an actual failing gate over a stuck running run", () => {
+    const gateRows: FailingGateRow[] = [
+      { cardId: "card-1", gateKey: "tests_ci", createdAt: new Date("2026-01-01T00:00:00Z") },
+    ];
+    const runRows: FailingRunRow[] = [
+      {
+        cardId: "card-1",
+        roleName: "implementer",
+        verdict: null,
+        status: "running",
+        startedAt: new Date("2026-01-02T00:00:00Z"),
+        finishedAt: null,
+      },
+    ];
+
+    const result = buildBlockedReasonMap(["card-1"], gateRows, runRows);
+    expect(result.get("card-1")).toBe("tests_ci failed");
+  });
+
+  it("does not leak a specific reason across cards (card-1 gets the generic fallback instead)", () => {
     const gateRows: FailingGateRow[] = [
       { cardId: "card-2", gateKey: "tests_ci", createdAt: new Date("2026-01-01T00:00:00Z") },
     ];
     const result = buildBlockedReasonMap(["card-1", "card-2"], gateRows, []);
-    expect(result.has("card-1")).toBe(false);
+    expect(result.get("card-1")).toBe("blocked with no recorded cause -- check agent run and gate history on the card detail page");
     expect(result.get("card-2")).toBe("tests_ci failed");
   });
 

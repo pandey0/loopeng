@@ -127,7 +127,34 @@ export function buildBlockedReasonMap(
       }
     }
 
-    if (bestReason) result.set(cardId, bestReason);
+    // A card can end up "blocked" while its most recent run is still parked
+    // in running/verifying -- that combination only happens when the API
+    // process died mid-run (sessionRegistry and the in-memory orchestrator
+    // loop both vanish, but the DB row is never updated) and a human later
+    // force-transitioned the card. None of the three sources above match a
+    // non-terminal run, so without this the card silently gets no reason at
+    // all even though there's an obvious explanation on hand.
+    if (!bestReason) {
+      let latestRun: FailingRunRow | null = null;
+      for (const row of runRows) {
+        if (row.cardId !== cardId) continue;
+        if (row.status !== "running" && row.status !== "verifying") continue;
+        if (!latestRun || (row.startedAt ?? new Date(0)) > (latestRun.startedAt ?? new Date(0))) {
+          latestRun = row;
+        }
+      }
+      if (latestRun) {
+        const role = latestRun.roleName ?? "agent";
+        bestReason = `${role} run interrupted (stuck in "${latestRun.status}" -- likely an API restart mid-run)`;
+      }
+    }
+
+    // Last-resort fallback: a card is genuinely blocked but none of the
+    // known signal sources explain why (e.g. a human blocked it directly, or
+    // a failure path that doesn't yet write to any of the three tables
+    // above). Surfacing a generic-but-honest message beats a blank/None
+    // reason, which reads as "the platform doesn't know either."
+    result.set(cardId, bestReason ?? "blocked with no recorded cause -- check agent run and gate history on the card detail page");
   }
 
   return result;
