@@ -1,114 +1,255 @@
 <mxfile host="app.diagrams.net">
-  <diagram name="loopeng architecture" id="loopeng-arch">
-    <mxGraphModel dx="1400" dy="900" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1650" pageHeight="1275" math="0" shadow="0">
+  <diagram name="1. System Architecture" id="loopeng-arch">
+    <mxGraphModel dx="1600" dy="1000" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1900" pageHeight="1500" math="0" shadow="0">
       <root>
         <mxCell id="0" />
         <mxCell id="1" parent="0" />
 
+        <!-- Legend -->
+        <mxCell id="legend" value="Legend" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;verticalAlign=top;fontStyle=1;fontSize=13;" vertex="1" parent="1">
+          <mxGeometry x="20" y="20" width="260" height="150" as="geometry" />
+        </mxCell>
+        <mxCell id="legend_infra" value="Infrastructure (external processes/services)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="30" y="50" width="240" height="24" as="geometry" />
+        </mxCell>
+        <mxCell id="legend_app" value="App (deployable unit: apps/*)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="30" y="78" width="240" height="24" as="geometry" />
+        </mxCell>
+        <mxCell id="legend_pkg" value="Library package (packages/*)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="30" y="106" width="240" height="24" as="geometry" />
+        </mxCell>
+        <mxCell id="legend_orch" value="Autonomous loop (orchestrator)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="30" y="134" width="240" height="24" as="geometry" />
+        </mxCell>
+
         <!-- Infra layer -->
-        <mxCell id="infra_pg" value="postgres:16-alpine&#10;(port 5433)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="1">
-          <mxGeometry x="40" y="40" width="180" height="60" as="geometry" />
+        <mxCell id="infra_pg" value="postgres:16-alpine (port 5433)&#10;&#10;Owns every table: cards, boards, agent_runs,&#10;gate_results, deploy_records, docs, event_log,&#10;card_questions, worktrees, automations.&#10;Single source of truth -- nothing in this system&#10;keeps authoritative state in memory except the&#10;process-local sessionRegistry (see note below)." style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;align=left;spacingLeft=6;fontSize=11;verticalAlign=top;spacingTop=4;" vertex="1" parent="1">
+          <mxGeometry x="320" y="20" width="300" height="140" as="geometry" />
         </mxCell>
-        <mxCell id="infra_redis" value="Redis (optional)&#10;BullMQ queue backend" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;dashed=1;" vertex="1" parent="1">
-          <mxGeometry x="260" y="40" width="180" height="60" as="geometry" />
+        <mxCell id="infra_redis" value="Redis (optional)&#10;&#10;Only used if REDIS_URL is set: backs a BullMQ&#10;queue for the orchestrator's dispatch strategy.&#10;Unset (the common case) -- orchestrator falls&#10;back to an in-process, single-worker serial&#10;queue instead. No other component touches it." style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;dashed=1;align=left;spacingLeft=6;fontSize=11;verticalAlign=top;spacingTop=4;" vertex="1" parent="1">
+          <mxGeometry x="640" y="20" width="300" height="140" as="geometry" />
         </mxCell>
-        <mxCell id="infra_claude" value="claude CLI&#10;(spawned subprocess per agent run)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="1">
-          <mxGeometry x="480" y="40" width="220" height="60" as="geometry" />
+        <mxCell id="infra_claude" value="claude CLI subprocess&#10;&#10;One real, separately-spawned process per&#10;agent_runs row (implementer/reviewer/planner/&#10;manager/designer). Streams stdout as jsonl&#10;stream events, captured incrementally into&#10;agent_runs.transcript. This is real inference,&#10;not a mock -- it reads/writes real files." style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;align=left;spacingLeft=6;fontSize=11;verticalAlign=top;spacingTop=4;" vertex="1" parent="1">
+          <mxGeometry x="960" y="20" width="300" height="140" as="geometry" />
         </mxCell>
-        <mxCell id="infra_git" value="wiki-repo / worktrees&#10;(git-backed, on disk)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="1">
-          <mxGeometry x="740" y="40" width="220" height="60" as="geometry" />
+        <mxCell id="infra_git" value="wiki-repo / worktrees (on disk, git-backed)&#10;&#10;wiki-repo: every doc is a real markdown file,&#10;git-committed on every save -- doubles as an&#10;Obsidian-browsable vault.&#10;worktrees: one isolated git checkout + branch&#10;per active card, created/destroyed per the card&#10;lifecycle (creating -> active -> merged/failed)." style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;align=left;spacingLeft=6;fontSize=11;verticalAlign=top;spacingTop=4;" vertex="1" parent="1">
+          <mxGeometry x="1280" y="20" width="300" height="140" as="geometry" />
         </mxCell>
-        <mxCell id="infra_docker" value="docker compose&#10;(web container only -- api runs native)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="1">
-          <mxGeometry x="1000" y="40" width="260" height="60" as="geometry" />
+        <mxCell id="infra_docker" value="docker compose (web service only)&#10;&#10;COMPOSE_SERVICES defaults to [&quot;web&quot;].&#10;Deploy pipeline runs `docker compose up&#10;--build web` on every merge to main.&#10;api is deliberately excluded -- see the red&#10;note lower down for why, and the operational&#10;consequence of that choice." style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;align=left;spacingLeft=6;fontSize=11;verticalAlign=top;spacingTop=4;" vertex="1" parent="1">
+          <mxGeometry x="1600" y="20" width="280" height="140" as="geometry" />
         </mxCell>
 
         <!-- Apps layer -->
-        <mxCell id="app_web" value="apps/web&#10;Next.js 15 (port 3000, containerized)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="1">
-          <mxGeometry x="1080" y="160" width="260" height="60" as="geometry" />
+        <mxCell id="app_web" value="apps/web -- Next.js 15 (port 3000)&#10;&#10;App Router pages: board, card detail, docs&#10;wiki, activity feed. Talks to the API purely&#10;over HTTP (lib/api.ts typed client) + a raw&#10;WebSocket for the live agent session viewer.&#10;Containerized: rebuilt fresh on every deploy." style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;align=left;spacingLeft=6;fontSize=11;verticalAlign=top;spacingTop=4;" vertex="1" parent="1">
+          <mxGeometry x="1560" y="220" width="320" height="130" as="geometry" />
         </mxCell>
-        <mxCell id="app_api" value="apps/api&#10;Fastify + WS (port 4000, native long-lived process)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="1">
-          <mxGeometry x="720" y="160" width="280" height="60" as="geometry" />
+        <mxCell id="app_api" value="apps/api -- Fastify + WS (port 4000)&#10;&#10;All REST routes (boards/cards/docs/events/&#10;intake) plus the agent-run WebSocket bridge.&#10;Hosts the process-local sessionRegistry (live&#10;agent sessions) and intakeOutcomes map (async&#10;intake polling). Runs natively -- see red note." style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;align=left;spacingLeft=6;fontSize=11;verticalAlign=top;spacingTop=4;" vertex="1" parent="1">
+          <mxGeometry x="1180" y="220" width="320" height="130" as="geometry" />
         </mxCell>
 
         <!-- Packages layer -->
-        <mxCell id="pkg_shared" value="@loopeng/shared&#10;zod schemas, state machine types" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;" vertex="1" parent="1">
-          <mxGeometry x="40" y="320" width="220" height="50" as="geometry" />
+        <mxCell id="pkg_shared" value="@loopeng/shared&#10;&#10;zod schemas (CardActiveRun, IntakeInput...),&#10;every enum (CardState, RiskTier, DocType...),&#10;and the card state machine graph itself&#10;(TRANSITIONS + canTransition). Zero internal&#10;deps -- every other package/app depends on it." style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;align=left;spacingLeft=6;fontSize=11;verticalAlign=top;spacingTop=4;" vertex="1" parent="1">
+          <mxGeometry x="20" y="400" width="280" height="130" as="geometry" />
         </mxCell>
-        <mxCell id="pkg_db" value="@loopeng/db&#10;Drizzle schema + client" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;" vertex="1" parent="1">
-          <mxGeometry x="40" y="400" width="220" height="50" as="geometry" />
+        <mxCell id="pkg_db" value="@loopeng/db&#10;&#10;Drizzle ORM schema (source of truth for every&#10;table listed on the postgres box) + a shared&#10;client instance, plus migrate/seed CLI scripts.&#10;Every package that reads/writes state imports&#10;this rather than talking to postgres directly." style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;align=left;spacingLeft=6;fontSize=11;verticalAlign=top;spacingTop=4;" vertex="1" parent="1">
+          <mxGeometry x="20" y="560" width="280" height="130" as="geometry" />
         </mxCell>
-        <mxCell id="pkg_ui" value="@loopeng/ui&#10;React component library" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;" vertex="1" parent="1">
-          <mxGeometry x="1080" y="320" width="220" height="50" as="geometry" />
+        <mxCell id="pkg_ui" value="@loopeng/ui&#10;&#10;CardTile (live snippet + watch button),&#10;Column, DocViewer, AdrForm, dialog/tabs/&#10;table/toast primitives. Pure presentational&#10;React -- no data fetching, no API calls." style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;align=left;spacingLeft=6;fontSize=11;verticalAlign=top;spacingTop=4;" vertex="1" parent="1">
+          <mxGeometry x="1580" y="400" width="280" height="110" as="geometry" />
         </mxCell>
-        <mxCell id="pkg_board" value="@loopeng/board-engine&#10;state machine, card-status, blockedReason" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;" vertex="1" parent="1">
-          <mxGeometry x="300" y="400" width="240" height="50" as="geometry" />
+        <mxCell id="pkg_board" value="@loopeng/board-engine&#10;&#10;applyTransition() enforces the state machine&#10;from @loopeng/shared against real DB rows.&#10;attachCardStatus()/computeBlockedReasons()&#10;compute blockedReason + activeAgentRun fresh&#10;on every card list fetch -- never stored." style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;align=left;spacingLeft=6;fontSize=11;verticalAlign=top;spacingTop=4;" vertex="1" parent="1">
+          <mxGeometry x="340" y="560" width="290" height="130" as="geometry" />
         </mxCell>
-        <mxCell id="pkg_doc" value="@loopeng/doc-engine&#10;git-backed markdown docs" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;" vertex="1" parent="1">
-          <mxGeometry x="560" y="400" width="220" height="50" as="geometry" />
+        <mxCell id="pkg_doc" value="@loopeng/doc-engine&#10;&#10;createDoc/updateDoc/getDoc/listDocs against&#10;wiki-repo: parses/writes YAML frontmatter&#10;(gray-matter), commits every change via&#10;simple-git, serves ADR/RFC/skill templates." style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;align=left;spacingLeft=6;fontSize=11;verticalAlign=top;spacingTop=4;" vertex="1" parent="1">
+          <mxGeometry x="660" y="560" width="290" height="130" as="geometry" />
         </mxCell>
-        <mxCell id="pkg_worktree" value="@loopeng/worktree-manager&#10;git worktree lifecycle + diff" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;" vertex="1" parent="1">
-          <mxGeometry x="800" y="400" width="240" height="50" as="geometry" />
+        <mxCell id="pkg_worktree" value="@loopeng/worktree-manager&#10;&#10;createWorktree/teardownWorktree: one real git&#10;worktree + branch per active card, off `main`.&#10;getRepoDiff() powers the approval dialog's&#10;real diff view. resolveRepoRoot() finds the&#10;checkout to operate on." style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;align=left;spacingLeft=6;fontSize=11;verticalAlign=top;spacingTop=4;" vertex="1" parent="1">
+          <mxGeometry x="980" y="560" width="290" height="130" as="geometry" />
         </mxCell>
-        <mxCell id="pkg_agents" value="@loopeng/agents&#10;claude CLI spawner, roles, sessionRegistry" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;" vertex="1" parent="1">
-          <mxGeometry x="300" y="480" width="260" height="50" as="geometry" />
+        <mxCell id="pkg_agents" value="@loopeng/agents&#10;&#10;Spawns the real claude CLI subprocess per role&#10;(implementer/reviewer/planner/manager) with&#10;role-specific prompts + MCP config. Owns&#10;sessionRegistry (live-view map) and&#10;getSessionSnippet() (board's one-line preview)." style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;align=left;spacingLeft=6;fontSize=11;verticalAlign=top;spacingTop=4;" vertex="1" parent="1">
+          <mxGeometry x="340" y="720" width="310" height="130" as="geometry" />
         </mxCell>
-        <mxCell id="pkg_gates" value="@loopeng/gates&#10;quality gate pipeline" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;" vertex="1" parent="1">
-          <mxGeometry x="580" y="480" width="220" height="50" as="geometry" />
+        <mxCell id="pkg_gates" value="@loopeng/gates&#10;&#10;runGatePipeline(): iterates every enabled&#10;gate_definitions row (tests_ci, security_scan,&#10;docs_adr_linked, adr_required, ci_status,&#10;design_review), runs each check for real,&#10;writes a gate_results row unconditionally." style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;align=left;spacingLeft=6;fontSize=11;verticalAlign=top;spacingTop=4;" vertex="1" parent="1">
+          <mxGeometry x="670" y="720" width="290" height="130" as="geometry" />
         </mxCell>
-        <mxCell id="pkg_deploy" value="@loopeng/deploy-engine&#10;merge, deploy, health-check, rollback" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;" vertex="1" parent="1">
-          <mxGeometry x="820" y="480" width="240" height="50" as="geometry" />
+        <mxCell id="pkg_deploy" value="@loopeng/deploy-engine&#10;&#10;runDeployPipeline(): checks main is clean +&#10;on the right branch, `git merge --no-ff`,&#10;rebuilds/redeploys web via docker compose,&#10;health-checks, auto-rollback on failure,&#10;records deploy_records + the deploy_live gate." style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;align=left;spacingLeft=6;fontSize=11;verticalAlign=top;spacingTop=4;" vertex="1" parent="1">
+          <mxGeometry x="1000" y="720" width="310" height="130" as="geometry" />
         </mxCell>
-        <mxCell id="pkg_connectors" value="@loopeng/connectors&#10;notification registry (github/slack/linear)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;" vertex="1" parent="1">
-          <mxGeometry x="1080" y="480" width="260" height="50" as="geometry" />
+        <mxCell id="pkg_connectors" value="@loopeng/connectors&#10;&#10;loadConnectorRegistry(): pluggable outbound&#10;notification/action targets (github/slack/&#10;linear stubs today). Gate checks and&#10;orchestrator hooks call into this to notify&#10;on failure/approval-needed events." style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;align=left;spacingLeft=6;fontSize=11;verticalAlign=top;spacingTop=4;" vertex="1" parent="1">
+          <mxGeometry x="1330" y="720" width="290" height="130" as="geometry" />
         </mxCell>
-        <mxCell id="pkg_mcp" value="@loopeng/mcp-subagent&#10;MCP server: spawn_sub_agent tool" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;" vertex="1" parent="1">
-          <mxGeometry x="40" y="480" width="240" height="50" as="geometry" />
+        <mxCell id="pkg_mcp" value="@loopeng/mcp-subagent&#10;&#10;An MCP server exposing one tool,&#10;spawn_sub_agent, injected into every claude&#10;CLI session's --mcp-config. Lets a running&#10;agent delegate a sub-task to a fresh agent in&#10;the same worktree and block on its result." style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;align=left;spacingLeft=6;fontSize=11;verticalAlign=top;spacingTop=4;" vertex="1" parent="1">
+          <mxGeometry x="20" y="720" width="300" height="130" as="geometry" />
         </mxCell>
-        <mxCell id="pkg_orch" value="@loopeng/orchestrator&#10;cron + event triggers, HierarchicalStrategy, HookRegistry" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;" vertex="1" parent="1">
-          <mxGeometry x="440" y="580" width="360" height="60" as="geometry" />
+        <mxCell id="pkg_orch" value="@loopeng/orchestrator -- the autonomous loop&#10;&#10;startOrchestrator() wires a cron trigger (periodic sweep incl. daily morning triage) and an event&#10;trigger (watches event_log for new `ready` cards) onto one shared HierarchicalStrategy. orchestrateCard()&#10;drives a card through worktree -> implementer -> reviewer -> gates -> approval-routing -> deploy, retrying up&#10;to 3x with the prior failure fed back as context. HookRegistry fires lifecycle hooks connectors subscribe to." style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;align=left;spacingLeft=6;fontSize=11;verticalAlign=top;spacingTop=4;" vertex="1" parent="1">
+          <mxGeometry x="340" y="900" width="1280" height="110" as="geometry" />
         </mxCell>
 
         <!-- Apps -> packages -->
-        <mxCell id="e1" style="edgeStyle=orthogonalEdgeStyle;html=1;" edge="1" parent="1" source="app_web" target="pkg_ui"><mxGeometry relative="1" as="geometry" /></mxCell>
-        <mxCell id="e2" style="edgeStyle=orthogonalEdgeStyle;html=1;" edge="1" parent="1" source="app_web" target="pkg_shared"><mxGeometry relative="1" as="geometry" /></mxCell>
-        <mxCell id="e3" style="edgeStyle=orthogonalEdgeStyle;html=1;" edge="1" parent="1" source="app_web" target="app_api"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e1" value="React Query fetches" style="edgeStyle=orthogonalEdgeStyle;html=1;fontSize=9;" edge="1" parent="1" source="app_web" target="pkg_ui"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e2" value="shared types" style="edgeStyle=orthogonalEdgeStyle;html=1;fontSize=9;" edge="1" parent="1" source="app_web" target="pkg_shared"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e3" value="REST + WebSocket" style="edgeStyle=orthogonalEdgeStyle;html=1;fontSize=9;" edge="1" parent="1" source="app_web" target="app_api"><mxGeometry relative="1" as="geometry" /></mxCell>
 
-        <mxCell id="e4" style="edgeStyle=orthogonalEdgeStyle;html=1;" edge="1" parent="1" source="app_api" target="pkg_agents"><mxGeometry relative="1" as="geometry" /></mxCell>
-        <mxCell id="e5" style="edgeStyle=orthogonalEdgeStyle;html=1;" edge="1" parent="1" source="app_api" target="pkg_board"><mxGeometry relative="1" as="geometry" /></mxCell>
-        <mxCell id="e6" style="edgeStyle=orthogonalEdgeStyle;html=1;" edge="1" parent="1" source="app_api" target="pkg_doc"><mxGeometry relative="1" as="geometry" /></mxCell>
-        <mxCell id="e7" style="edgeStyle=orthogonalEdgeStyle;html=1;" edge="1" parent="1" source="app_api" target="pkg_orch"><mxGeometry relative="1" as="geometry" /></mxCell>
-        <mxCell id="e8" style="edgeStyle=orthogonalEdgeStyle;html=1;" edge="1" parent="1" source="app_api" target="pkg_worktree"><mxGeometry relative="1" as="geometry" /></mxCell>
-        <mxCell id="e9" style="edgeStyle=orthogonalEdgeStyle;html=1;" edge="1" parent="1" source="app_api" target="pkg_db"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e4" value="dispatches agent runs" style="edgeStyle=orthogonalEdgeStyle;html=1;fontSize=9;" edge="1" parent="1" source="app_api" target="pkg_agents"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e5" value="card CRUD + status" style="edgeStyle=orthogonalEdgeStyle;html=1;fontSize=9;" edge="1" parent="1" source="app_api" target="pkg_board"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e6" value="doc CRUD" style="edgeStyle=orthogonalEdgeStyle;html=1;fontSize=9;" edge="1" parent="1" source="app_api" target="pkg_doc"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e7" value="owns lifecycle" style="edgeStyle=orthogonalEdgeStyle;html=1;fontSize=9;" edge="1" parent="1" source="app_api" target="pkg_orch"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e8" value="diff for approval dialog" style="edgeStyle=orthogonalEdgeStyle;html=1;fontSize=9;" edge="1" parent="1" source="app_api" target="pkg_worktree"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e9" value="every route" style="edgeStyle=orthogonalEdgeStyle;html=1;fontSize=9;" edge="1" parent="1" source="app_api" target="pkg_db"><mxGeometry relative="1" as="geometry" /></mxCell>
 
         <!-- orchestrator wires everything -->
-        <mxCell id="e10" style="edgeStyle=orthogonalEdgeStyle;html=1;dashed=1;" edge="1" parent="1" source="pkg_orch" target="pkg_agents"><mxGeometry relative="1" as="geometry" /></mxCell>
-        <mxCell id="e11" style="edgeStyle=orthogonalEdgeStyle;html=1;dashed=1;" edge="1" parent="1" source="pkg_orch" target="pkg_gates"><mxGeometry relative="1" as="geometry" /></mxCell>
-        <mxCell id="e12" style="edgeStyle=orthogonalEdgeStyle;html=1;dashed=1;" edge="1" parent="1" source="pkg_orch" target="pkg_deploy"><mxGeometry relative="1" as="geometry" /></mxCell>
-        <mxCell id="e13" style="edgeStyle=orthogonalEdgeStyle;html=1;dashed=1;" edge="1" parent="1" source="pkg_orch" target="pkg_connectors"><mxGeometry relative="1" as="geometry" /></mxCell>
-        <mxCell id="e14" style="edgeStyle=orthogonalEdgeStyle;html=1;dashed=1;" edge="1" parent="1" source="pkg_orch" target="pkg_board"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e10" value="runs implementer/reviewer" style="edgeStyle=orthogonalEdgeStyle;html=1;dashed=1;fontSize=9;" edge="1" parent="1" source="pkg_orch" target="pkg_agents"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e11" value="runs gate_checks stage" style="edgeStyle=orthogonalEdgeStyle;html=1;dashed=1;fontSize=9;" edge="1" parent="1" source="pkg_orch" target="pkg_gates"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e12" value="triggers deploy stage" style="edgeStyle=orthogonalEdgeStyle;html=1;dashed=1;fontSize=9;" edge="1" parent="1" source="pkg_orch" target="pkg_deploy"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e13" value="hook notifications" style="edgeStyle=orthogonalEdgeStyle;html=1;dashed=1;fontSize=9;" edge="1" parent="1" source="pkg_orch" target="pkg_connectors"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e14" value="applyTransition() calls" style="edgeStyle=orthogonalEdgeStyle;html=1;dashed=1;fontSize=9;" edge="1" parent="1" source="pkg_orch" target="pkg_board"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e14b" value="creates/reuses worktree" style="edgeStyle=orthogonalEdgeStyle;html=1;dashed=1;fontSize=9;" edge="1" parent="1" source="pkg_orch" target="pkg_worktree"><mxGeometry relative="1" as="geometry" /></mxCell>
 
         <!-- packages -> foundational -->
-        <mxCell id="e15" style="edgeStyle=orthogonalEdgeStyle;html=1;" edge="1" parent="1" source="pkg_board" target="pkg_db"><mxGeometry relative="1" as="geometry" /></mxCell>
-        <mxCell id="e16" style="edgeStyle=orthogonalEdgeStyle;html=1;" edge="1" parent="1" source="pkg_doc" target="pkg_db"><mxGeometry relative="1" as="geometry" /></mxCell>
-        <mxCell id="e17" style="edgeStyle=orthogonalEdgeStyle;html=1;" edge="1" parent="1" source="pkg_agents" target="pkg_doc"><mxGeometry relative="1" as="geometry" /></mxCell>
-        <mxCell id="e18" style="edgeStyle=orthogonalEdgeStyle;html=1;" edge="1" parent="1" source="pkg_agents" target="pkg_worktree"><mxGeometry relative="1" as="geometry" /></mxCell>
-        <mxCell id="e19" style="edgeStyle=orthogonalEdgeStyle;html=1;" edge="1" parent="1" source="pkg_gates" target="pkg_worktree"><mxGeometry relative="1" as="geometry" /></mxCell>
-        <mxCell id="e20" style="edgeStyle=orthogonalEdgeStyle;html=1;" edge="1" parent="1" source="pkg_gates" target="pkg_connectors"><mxGeometry relative="1" as="geometry" /></mxCell>
-        <mxCell id="e21" style="edgeStyle=orthogonalEdgeStyle;html=1;" edge="1" parent="1" source="pkg_deploy" target="pkg_board"><mxGeometry relative="1" as="geometry" /></mxCell>
-        <mxCell id="e22" style="edgeStyle=orthogonalEdgeStyle;html=1;" edge="1" parent="1" source="pkg_deploy" target="pkg_worktree"><mxGeometry relative="1" as="geometry" /></mxCell>
-        <mxCell id="e23" style="edgeStyle=orthogonalEdgeStyle;html=1;" edge="1" parent="1" source="pkg_mcp" target="pkg_agents"><mxGeometry relative="1" as="geometry" /></mxCell>
-        <mxCell id="e24" style="edgeStyle=orthogonalEdgeStyle;html=1;" edge="1" parent="1" source="pkg_ui" target="pkg_shared"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e15" value="reads/writes cards" style="edgeStyle=orthogonalEdgeStyle;html=1;fontSize=9;" edge="1" parent="1" source="pkg_board" target="pkg_db"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e16" value="reads/writes docs" style="edgeStyle=orthogonalEdgeStyle;html=1;fontSize=9;" edge="1" parent="1" source="pkg_doc" target="pkg_db"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e17" value="get_doc MCP tool reads" style="edgeStyle=orthogonalEdgeStyle;html=1;fontSize=9;" edge="1" parent="1" source="pkg_agents" target="pkg_doc"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e18" value="spawns process inside worktree path" style="edgeStyle=orthogonalEdgeStyle;html=1;fontSize=9;" edge="1" parent="1" source="pkg_agents" target="pkg_worktree"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e19" value="checks run against worktree files" style="edgeStyle=orthogonalEdgeStyle;html=1;fontSize=9;" edge="1" parent="1" source="pkg_gates" target="pkg_worktree"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e20" value="notifies on gate failure" style="edgeStyle=orthogonalEdgeStyle;html=1;fontSize=9;" edge="1" parent="1" source="pkg_gates" target="pkg_connectors"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e21" value="applyTransition to done/blocked" style="edgeStyle=orthogonalEdgeStyle;html=1;fontSize=9;" edge="1" parent="1" source="pkg_deploy" target="pkg_board"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e22" value="merges + tears down worktree" style="edgeStyle=orthogonalEdgeStyle;html=1;fontSize=9;" edge="1" parent="1" source="pkg_deploy" target="pkg_worktree"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e23" value="delegates via spawn_sub_agent" style="edgeStyle=orthogonalEdgeStyle;html=1;fontSize=9;" edge="1" parent="1" source="pkg_mcp" target="pkg_agents"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e24" value="shared types" style="edgeStyle=orthogonalEdgeStyle;html=1;fontSize=9;" edge="1" parent="1" source="pkg_ui" target="pkg_shared"><mxGeometry relative="1" as="geometry" /></mxCell>
 
         <!-- infra edges -->
-        <mxCell id="e25" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeColor=#6c8ebf;" edge="1" parent="1" source="pkg_db" target="infra_pg"><mxGeometry relative="1" as="geometry" /></mxCell>
-        <mxCell id="e26" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeColor=#6c8ebf;" edge="1" parent="1" source="pkg_orch" target="infra_redis"><mxGeometry relative="1" as="geometry" /></mxCell>
-        <mxCell id="e27" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeColor=#6c8ebf;" edge="1" parent="1" source="pkg_agents" target="infra_claude"><mxGeometry relative="1" as="geometry" /></mxCell>
-        <mxCell id="e28" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeColor=#6c8ebf;" edge="1" parent="1" source="pkg_worktree" target="infra_git"><mxGeometry relative="1" as="geometry" /></mxCell>
-        <mxCell id="e29" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeColor=#6c8ebf;" edge="1" parent="1" source="pkg_deploy" target="infra_docker"><mxGeometry relative="1" as="geometry" /></mxCell>
-        <mxCell id="e30" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeColor=#6c8ebf;" edge="1" parent="1" source="app_web" target="infra_docker"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e25" value="SQL (Drizzle)" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeColor=#6c8ebf;fontSize=9;" edge="1" parent="1" source="pkg_db" target="infra_pg"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e26" value="BullMQ jobs (if REDIS_URL set)" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeColor=#6c8ebf;fontSize=9;" edge="1" parent="1" source="pkg_orch" target="infra_redis"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e27" value="spawns child process, streams stdout" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeColor=#6c8ebf;fontSize=9;" edge="1" parent="1" source="pkg_agents" target="infra_claude"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e28" value="simple-git operations" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeColor=#6c8ebf;fontSize=9;" edge="1" parent="1" source="pkg_worktree" target="infra_git"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e29" value="docker compose --build web" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeColor=#6c8ebf;fontSize=9;" edge="1" parent="1" source="pkg_deploy" target="infra_docker"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e30" value="rebuilt on every deploy" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeColor=#6c8ebf;fontSize=9;" edge="1" parent="1" source="app_web" target="infra_docker"><mxGeometry relative="1" as="geometry" /></mxCell>
 
-        <mxCell id="note1" value="Note: apps/api runs as a native long-lived process (needs live git/docker/claude-CLI access a container lacks) -- it is NOT rebuilt by the deploy pipeline's docker compose step, unlike web." style="text;html=1;align=left;verticalAlign=top;whiteSpace=wrap;fontSize=11;fontColor=#990000;" vertex="1" parent="1">
-          <mxGeometry x="720" y="240" width="380" height="60" as="geometry" />
+        <mxCell id="note1" value="NATIVE-PROCESS CAVEAT: apps/api runs as a long-lived native `tsx src/index.ts` process, deliberately NOT&#10;containerized -- it needs live git/docker/claude-CLI access a container image lacks. Consequence: COMPOSE_SERVICES&#10;defaults to [&quot;web&quot;] only, so the deploy pipeline never rebuilds/restarts api. Any code change to apps/api or a&#10;package it depends on only takes effect after a human manually kills and restarts that native process. This also&#10;means api's in-memory state (sessionRegistry live sessions, intakeOutcomes, orchestrator's event-trigger cursor)&#10;is wiped on every manual restart -- in-flight agent runs are orphaned (DB row stuck running/verifying) even&#10;though the underlying claude subprocess may keep executing in the background, unwatched." style="text;html=1;align=left;verticalAlign=top;whiteSpace=wrap;fontSize=11;fontColor=#990000;strokeColor=#990000;fillColor=#fff0f0;rounded=1;spacingLeft=8;spacingTop=6;" vertex="1" parent="1">
+          <mxGeometry x="340" y="340" width="1220" height="90" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+
+  <diagram name="2. Card Lifecycle State Machine" id="loopeng-states">
+    <mxGraphModel dx="1200" dy="800" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1650" pageHeight="1100" math="0" shadow="0">
+      <root>
+        <mxCell id="s0" />
+        <mxCell id="s1" parent="s0" />
+
+        <mxCell id="title" value="packages/shared/src/state-machine.ts: TRANSITIONS graph, enforced by board-engine's applyTransition() on every move." style="text;html=1;fontSize=13;fontStyle=1;" vertex="1" parent="s1">
+          <mxGeometry x="20" y="10" width="1000" height="30" as="geometry" />
+        </mxCell>
+
+        <mxCell id="st_backlog" value="backlog&#10;&#10;Card exists but nobody has&#10;said it's next. Planner/manager&#10;drop fresh decompositions here." style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;align=left;spacingLeft=6;fontSize=10;verticalAlign=top;spacingTop=4;" vertex="1" parent="s1">
+          <mxGeometry x="40" y="80" width="200" height="100" as="geometry" />
+        </mxCell>
+        <mxCell id="st_ready" value="ready&#10;&#10;A human promoted it. This is&#10;the ONLY state the orchestrator's&#10;dispatch triggers watch for." style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;align=left;spacingLeft=6;fontSize=10;verticalAlign=top;spacingTop=4;" vertex="1" parent="s1">
+          <mxGeometry x="300" y="80" width="200" height="100" as="geometry" />
+        </mxCell>
+        <mxCell id="st_prog" value="in_progress&#10;&#10;Worktree created/reused, real&#10;implementer agent writing code.&#10;Live snippet shown on board tile." style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;align=left;spacingLeft=6;fontSize=10;verticalAlign=top;spacingTop=4;" vertex="1" parent="s1">
+          <mxGeometry x="560" y="80" width="200" height="100" as="geometry" />
+        </mxCell>
+        <mxCell id="st_review" value="in_review&#10;&#10;Independent reviewer sub-agent&#10;(read-only) checks the diff&#10;against every acceptance criterion." style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;align=left;spacingLeft=6;fontSize=10;verticalAlign=top;spacingTop=4;" vertex="1" parent="s1">
+          <mxGeometry x="820" y="80" width="200" height="100" as="geometry" />
+        </mxCell>
+        <mxCell id="st_gates" value="gate_checks&#10;&#10;runGatePipeline(): tests_ci,&#10;security_scan, docs_adr_linked,&#10;adr_required, ci_status, design_review." style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;align=left;spacingLeft=6;fontSize=10;verticalAlign=top;spacingTop=4;" vertex="1" parent="s1">
+          <mxGeometry x="1080" y="80" width="200" height="100" as="geometry" />
+        </mxCell>
+        <mxCell id="st_await" value="awaiting_approval&#10;&#10;Only for riskTier=high or&#10;touchesArchitecture cards. Human&#10;reviews full diff+transcript+gates." style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;align=left;spacingLeft=6;fontSize=10;verticalAlign=top;spacingTop=4;" vertex="1" parent="s1">
+          <mxGeometry x="1080" y="230" width="200" height="100" as="geometry" />
+        </mxCell>
+        <mxCell id="st_deploy" value="deploying&#10;&#10;Real: git merge --no-ff into&#10;main, docker compose rebuild+&#10;redeploy web, health-check." style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;align=left;spacingLeft=6;fontSize=10;verticalAlign=top;spacingTop=4;" vertex="1" parent="s1">
+          <mxGeometry x="820" y="230" width="200" height="100" as="geometry" />
+        </mxCell>
+        <mxCell id="st_done" value="done&#10;&#10;Deployed and healthy.&#10;Worktree torn down (merged)." style="rounded=1;whiteSpace=wrap;html=1;fillColor=#c8f7c5;strokeColor=#2f9e44;align=left;spacingLeft=6;fontSize=10;verticalAlign=top;spacingTop=4;" vertex="1" parent="s1">
+          <mxGeometry x="560" y="230" width="200" height="100" as="geometry" />
+        </mxCell>
+        <mxCell id="st_blocked" value="blocked&#10;&#10;Escape hatch from almost any stage. blockedReason is always computed fresh and never blank: latest failing&#10;gate, failed/rejected agent run, open QUESTION, or a run stuck running/verifying (API-restart orphan) --&#10;whichever happened most recently. blocked -> ready is the only way out (manual today, or a human answering&#10;a QUESTION which does it automatically)." style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;align=left;spacingLeft=6;fontSize=10;verticalAlign=top;spacingTop=4;" vertex="1" parent="s1">
+          <mxGeometry x="300" y="400" width="700" height="110" as="geometry" />
+        </mxCell>
+        <mxCell id="st_cancelled" value="cancelled&#10;&#10;Terminal, manual only." style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;align=left;spacingLeft=6;fontSize=10;verticalAlign=top;spacingTop=4;" vertex="1" parent="s1">
+          <mxGeometry x="40" y="400" width="200" height="60" as="geometry" />
+        </mxCell>
+
+        <mxCell id="t1" value="human promotes" style="html=1;fontSize=9;" edge="1" parent="s1" source="st_backlog" target="st_ready"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="t2" value="event/cron trigger dispatches" style="html=1;fontSize=9;" edge="1" parent="s1" source="st_ready" target="st_prog"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="t3" value="implementer succeeds" style="html=1;fontSize=9;" edge="1" parent="s1" source="st_prog" target="st_review"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="t4" value="reviewer VERDICT: PASS" style="html=1;fontSize=9;" edge="1" parent="s1" source="st_review" target="st_gates"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="t5" value="all blocking gates pass, riskTier=high" style="html=1;fontSize=9;" edge="1" parent="s1" source="st_gates" target="st_await"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="t6" value="all blocking gates pass, riskTier=low/med (auto)" style="html=1;fontSize=9;" edge="1" parent="s1" source="st_gates" target="st_deploy" ><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="1180" y="200"/></Array></mxGeometry></mxCell>
+        <mxCell id="t7" value="human clicks Approve" style="html=1;fontSize=9;" edge="1" parent="s1" source="st_await" target="st_deploy"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="t8" value="deploy healthy" style="html=1;fontSize=9;" edge="1" parent="s1" source="st_deploy" target="st_done"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="t9" value="human moves directly (no gates, legacy path)" style="html=1;fontSize=9;dashed=1;" edge="1" parent="s1" source="st_review" target="st_done"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="920" y="360"/></Array></mxGeometry></mxCell>
+
+        <mxCell id="b1" value="implementer failed x3 attempts" style="html=1;fontSize=9;strokeColor=#b85450;" edge="1" parent="s1" source="st_prog" target="st_blocked"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="b2" value="QUESTION raised (no attempt consumed)" style="html=1;fontSize=9;strokeColor=#b85450;" edge="1" parent="s1" source="st_prog" target="st_blocked"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="700" y="360"/></Array></mxGeometry></mxCell>
+        <mxCell id="b3" value="reviewer rejected x3 attempts" style="html=1;fontSize=9;strokeColor=#b85450;" edge="1" parent="s1" source="st_review" target="st_blocked"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="b4" value="a blocking gate failed" style="html=1;fontSize=9;strokeColor=#b85450;" edge="1" parent="s1" source="st_gates" target="st_blocked"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="1180" y="530"/></Array></mxGeometry></mxCell>
+        <mxCell id="b5" value="deploy/merge failed (auto-rollback)" style="html=1;fontSize=9;strokeColor=#b85450;" edge="1" parent="s1" source="st_deploy" target="st_blocked"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="920" y="530"/></Array></mxGeometry></mxCell>
+        <mxCell id="r1" value="human resolves + re-promotes (or auto after QUESTION answered)" style="html=1;fontSize=9;strokeColor=#2f9e44;" edge="1" parent="s1" source="st_blocked" target="st_ready"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="400" y="330"/></Array></mxGeometry></mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+
+  <diagram name="3. End-to-End Request Sequence" id="loopeng-sequence">
+    <mxGraphModel dx="1200" dy="800" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1650" pageHeight="1300" math="0" shadow="0">
+      <root>
+        <mxCell id="q0" />
+        <mxCell id="q1" parent="q0" />
+
+        <mxCell id="qtitle" value="Real scenario: a product owner reports a bug in plain English, all the way through to a live deploy. See USER_JOURNEY.md for the full narrative." style="text;html=1;fontSize=13;fontStyle=1;" vertex="1" parent="q1">
+          <mxGeometry x="20" y="0" width="1200" height="30" as="geometry" />
+        </mxCell>
+
+        <!-- lifelines -->
+        <mxCell id="l_user" value="Product Owner" style="text;html=1;fontStyle=1;fontSize=12;align=center;" vertex="1" parent="q1"><mxGeometry x="20" y="40" width="160" height="20" as="geometry"/></mxCell>
+        <mxCell id="l_web" value="apps/web" style="text;html=1;fontStyle=1;fontSize=12;align=center;" vertex="1" parent="q1"><mxGeometry x="220" y="40" width="160" height="20" as="geometry"/></mxCell>
+        <mxCell id="l_api" value="apps/api" style="text;html=1;fontStyle=1;fontSize=12;align=center;" vertex="1" parent="q1"><mxGeometry x="420" y="40" width="160" height="20" as="geometry"/></mxCell>
+        <mxCell id="l_orch" value="orchestrator" style="text;html=1;fontStyle=1;fontSize=12;align=center;" vertex="1" parent="q1"><mxGeometry x="620" y="40" width="160" height="20" as="geometry"/></mxCell>
+        <mxCell id="l_agent" value="claude CLI (impl/reviewer)" style="text;html=1;fontStyle=1;fontSize=12;align=center;" vertex="1" parent="q1"><mxGeometry x="820" y="40" width="180" height="20" as="geometry"/></mxCell>
+        <mxCell id="l_gates" value="gates + deploy-engine" style="text;html=1;fontStyle=1;fontSize=12;align=center;" vertex="1" parent="q1"><mxGeometry x="1040" y="40" width="180" height="20" as="geometry"/></mxCell>
+        <mxCell id="l_db" value="postgres + git" style="text;html=1;fontStyle=1;fontSize=12;align=center;" vertex="1" parent="q1"><mxGeometry x="1260" y="40" width="160" height="20" as="geometry"/></mxCell>
+
+        <mxCell id="ln_user" style="html=1;dashed=1;" edge="1" parent="q1"><mxGeometry x1="100" y1="70" x2="100" y2="1160" as="geometry"><mxPoint x="100" y="70" as="sourcePoint"/><mxPoint x="100" y="1160" as="targetPoint"/></mxGeometry></mxCell>
+        <mxCell id="ln_web" style="html=1;dashed=1;" edge="1" parent="q1"><mxGeometry><mxPoint x="300" y="70" as="sourcePoint"/><mxPoint x="300" y="1160" as="targetPoint"/></mxGeometry></mxCell>
+        <mxCell id="ln_api" style="html=1;dashed=1;" edge="1" parent="q1"><mxGeometry><mxPoint x="500" y="70" as="sourcePoint"/><mxPoint x="500" y="1160" as="targetPoint"/></mxGeometry></mxCell>
+        <mxCell id="ln_orch" style="html=1;dashed=1;" edge="1" parent="q1"><mxGeometry><mxPoint x="700" y="70" as="sourcePoint"/><mxPoint x="700" y="1160" as="targetPoint"/></mxGeometry></mxCell>
+        <mxCell id="ln_agent" style="html=1;dashed=1;" edge="1" parent="q1"><mxGeometry><mxPoint x="910" y="70" as="sourcePoint"/><mxPoint x="910" y="1160" as="targetPoint"/></mxGeometry></mxCell>
+        <mxCell id="ln_gates" style="html=1;dashed=1;" edge="1" parent="q1"><mxGeometry><mxPoint x="1130" y="70" as="sourcePoint"/><mxPoint x="1130" y="1160" as="targetPoint"/></mxGeometry></mxCell>
+        <mxCell id="ln_db" style="html=1;dashed=1;" edge="1" parent="q1"><mxGeometry><mxPoint x="1340" y="70" as="sourcePoint"/><mxPoint x="1340" y="1160" as="targetPoint"/></mxGeometry></mxCell>
+
+        <!-- steps as horizontal arrows at increasing y -->
+        <mxCell id="s1a" value="1. types freeform bug report" style="html=1;fontSize=10;" edge="1" parent="q1" source="l_user" target="l_web"><mxGeometry y="100" relative="1" as="geometry"/></mxCell>
+        <mxCell id="s1b" value="2. POST /boards/:id/intake" style="html=1;fontSize=10;" edge="1" parent="q1" source="l_web" target="l_api"><mxGeometry y="140" relative="1" as="geometry"/></mxCell>
+        <mxCell id="s1c" value="3. insert agent_runs(planner,queued) -&gt; 202 {agentRunId} immediately" style="html=1;fontSize=10;" edge="1" parent="q1" source="l_api" target="l_db"><mxGeometry y="180" relative="1" as="geometry"/></mxCell>
+        <mxCell id="s1d" value="4. spawns planner claude CLI in background (not awaited)" style="html=1;fontSize=10;" edge="1" parent="q1" source="l_api" target="l_agent"><mxGeometry y="220" relative="1" as="geometry"/></mxCell>
+        <mxCell id="s1e" value="5. streams transcript live -&gt; sessionRegistry -&gt; WebSocket -&gt; AgentSessionPanel" style="html=1;fontSize=10;" edge="1" parent="q1" source="l_agent" target="l_user"><mxGeometry y="260" relative="1" as="geometry"/></mxCell>
+        <mxCell id="s1f" value="6. planner drafts spec doc + epic/child cards -&gt; backlog; manager agent reviews epic, may adjust breakdown" style="html=1;fontSize=10;" edge="1" parent="q1" source="l_agent" target="l_db"><mxGeometry y="300" relative="1" as="geometry"/></mxCell>
+
+        <mxCell id="s2a" value="7. drags a child card backlog -&gt; ready" style="html=1;fontSize=10;" edge="1" parent="q1" source="l_user" target="l_web"><mxGeometry y="360" relative="1" as="geometry"/></mxCell>
+        <mxCell id="s2b" value="8. POST /cards/:id/transition -&gt; applyTransition() validates against TRANSITIONS graph" style="html=1;fontSize=10;" edge="1" parent="q1" source="l_web" target="l_api"><mxGeometry y="400" relative="1" as="geometry"/></mxCell>
+        <mxCell id="s2c" value="9. event_log row written (card.moved to=ready)" style="html=1;fontSize=10;" edge="1" parent="q1" source="l_api" target="l_db"><mxGeometry y="440" relative="1" as="geometry"/></mxCell>
+        <mxCell id="s2d" value="10. event trigger sees it (or next cron sweep), calls orchestrateCard()" style="html=1;fontSize=10;" edge="1" parent="q1" source="l_db" target="l_orch"><mxGeometry y="480" relative="1" as="geometry"/></mxCell>
+
+        <mxCell id="s3a" value="11. createWorktree(): fresh git branch/checkout off main" style="html=1;fontSize=10;" edge="1" parent="q1" source="l_orch" target="l_db"><mxGeometry y="540" relative="1" as="geometry"/></mxCell>
+        <mxCell id="s3b" value="12. transition -&gt; in_progress; runImplementerAgent(card)" style="html=1;fontSize=10;" edge="1" parent="q1" source="l_orch" target="l_agent"><mxGeometry y="580" relative="1" as="geometry"/></mxCell>
+        <mxCell id="s3c" value="13. real code edits + test run inside the worktree; board tile shows live snippet" style="html=1;fontSize=10;" edge="1" parent="q1" source="l_agent" target="l_user"><mxGeometry y="620" relative="1" as="geometry"/></mxCell>
+        <mxCell id="s3d" value="14. success -&gt; in_review; runReviewerAgent(card) (read-only, no edit tools)" style="html=1;fontSize=10;" edge="1" parent="q1" source="l_orch" target="l_agent"><mxGeometry y="660" relative="1" as="geometry"/></mxCell>
+        <mxCell id="s3e" value="15. VERDICT: FAIL -&gt; priorFailureNote fed into next attempt's prompt, retries (max 3)" style="html=1;fontSize=10;" edge="1" parent="q1" source="l_agent" target="l_orch"><mxGeometry y="700" relative="1" as="geometry"/></mxCell>
+        <mxCell id="s3f" value="16. VERDICT: PASS -&gt; peer_review gate recorded passed; transition -&gt; gate_checks" style="html=1;fontSize=10;" edge="1" parent="q1" source="l_agent" target="l_gates"><mxGeometry y="740" relative="1" as="geometry"/></mxCell>
+
+        <mxCell id="s4a" value="17. runGatePipeline(): tests_ci, security_scan, docs_adr_linked... each writes a real gate_results row" style="html=1;fontSize=10;" edge="1" parent="q1" source="l_gates" target="l_db"><mxGeometry y="800" relative="1" as="geometry"/></mxCell>
+        <mxCell id="s4b" value="18a. riskTier=high -&gt; awaiting_approval; user opens Review &amp; Approve (diff+transcript+gates)" style="html=1;fontSize=10;" edge="1" parent="q1" source="l_gates" target="l_user"><mxGeometry y="840" relative="1" as="geometry"/></mxCell>
+        <mxCell id="s4c" value="18b. riskTier=low/med -&gt; auto transition -&gt; deploying (no human step)" style="html=1;fontSize=10;" edge="1" parent="q1" source="l_gates" target="l_orch"><mxGeometry y="880" relative="1" as="geometry"/></mxCell>
+
+        <mxCell id="s5a" value="19. runDeployPipeline(): checks main clean, git merge --no-ff, docker compose --build web" style="html=1;fontSize=10;" edge="1" parent="q1" source="l_gates" target="l_db"><mxGeometry y="940" relative="1" as="geometry"/></mxCell>
+        <mxCell id="s5b" value="20. health check passes -&gt; deploy_records=live, deploy_live gate passed, card -&gt; done, worktree torn down" style="html=1;fontSize=10;" edge="1" parent="q1" source="l_gates" target="l_db"><mxGeometry y="980" relative="1" as="geometry"/></mxCell>
+        <mxCell id="s5c" value="21. board shows the card in Done -- production bug fixed" style="html=1;fontSize=10;" edge="1" parent="q1" source="l_db" target="l_user"><mxGeometry y="1020" relative="1" as="geometry"/></mxCell>
+
+        <mxCell id="s6" value="Any step can instead land the card in blocked, with a concrete blockedReason always computed (never blank) -- see diagram 2." style="text;html=1;fontSize=11;fontColor=#990000;align=left;" vertex="1" parent="q1">
+          <mxGeometry x="20" y="1070" width="1200" height="30" as="geometry" />
         </mxCell>
       </root>
     </mxGraphModel>
