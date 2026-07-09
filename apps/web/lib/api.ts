@@ -1,4 +1,4 @@
-import type { Board, Card, CardDependency, CardState, CardWithStatus, Doc } from "@loopeng/shared";
+import type { Board, Card, CardDependency, CardState, CardWithStatus, Doc, Project } from "@loopeng/shared";
 
 export interface CardDetailDocLink {
   docId: string;
@@ -138,6 +138,10 @@ export const api = {
   getBoard: (id: string) => request<Board & { cards: Card[] }>(`/boards/${id}`),
   createBoard: (input: { name: string; description?: string }) =>
     request<Board>("/boards", { method: "POST", body: JSON.stringify(input) }),
+
+  listProjects: () => request<Project[]>("/projects"),
+  createProject: (input: { name: string; repoPath: string }) =>
+    request<{ project: Project; board: Board }>("/projects", { method: "POST", body: JSON.stringify(input) }),
   intake: (boardId: string, requestText: string) =>
     request<IntakeStartResult>(`/boards/${boardId}/intake`, { method: "POST", body: JSON.stringify({ requestText }) }),
   getIntakeStatus: (boardId: string, agentRunId: string) =>

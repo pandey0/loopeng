@@ -1,13 +1,51 @@
 import { execSync } from "node:child_process";
+import { existsSync } from "node:fs";
 import path from "node:path";
 import { simpleGit } from "simple-git";
 import { and, eq } from "drizzle-orm";
 import { db } from "@loopeng/db";
-import { cards, worktrees } from "@loopeng/db";
+import { boards, cards, projects, worktrees } from "@loopeng/db";
 
 export function resolveRepoRoot(): string {
   if (process.env.TARGET_REPO_PATH) return process.env.TARGET_REPO_PATH;
   return execSync("git rev-parse --show-toplevel", { encoding: "utf-8" }).trim();
+}
+
+// A repo path is only usable if it's a directory that's the root of a git
+// repo -- checking for .git specifically (not `git rev-parse
+// --is-inside-work-tree`, which walks up parent directories and would
+// happily accept a subdirectory or an unrelated ancestor repo).
+export function isValidGitRepoRoot(repoPath: string): boolean {
+  return existsSync(repoPath) && existsSync(path.join(repoPath, ".git"));
+}
+
+export class InvalidRepoError extends Error {
+  constructor(public readonly repoPath: string) {
+    super(`target repo missing or not a git repository: ${repoPath}`);
+    this.name = "InvalidRepoError";
+  }
+}
+
+// Resolves the target repo root for a given card: a card's board can be
+// scoped to a registered project (boards.project_id), in which case that
+// project's repo_path is authoritative. Boards with no project attached
+// (the single-project/dogfood case, and any board that predates this
+// feature) fall back to the pre-multi-project TARGET_REPO_PATH env var /
+// current-repo behavior, unchanged. Always re-validates the resolved path
+// actually is a git repo right now -- a project's directory can be deleted
+// or moved after registration, and every dispatch must catch that instead
+// of letting simple-git throw deep inside createWorktree.
+export async function resolveRepoRootForCard(cardId: string): Promise<string> {
+  const [row] = await db
+    .select({ repoPath: projects.repoPath })
+    .from(cards)
+    .innerJoin(boards, eq(cards.boardId, boards.id))
+    .leftJoin(projects, eq(boards.projectId, projects.id))
+    .where(eq(cards.id, cardId));
+
+  const repoPath = row?.repoPath ?? resolveRepoRoot();
+  if (!isValidGitRepoRoot(repoPath)) throw new InvalidRepoError(repoPath);
+  return repoPath;
 }
 
 function resolveWorktreesRoot(): string {
@@ -33,7 +71,7 @@ export async function createWorktree(cardId: string, opts: CreateWorktreeOptions
   const [card] = await db.select().from(cards).where(eq(cards.id, cardId));
   if (!card) throw new Error(`card not found: ${cardId}`);
 
-  const repoRoot = resolveRepoRoot();
+  const repoRoot = await resolveRepoRootForCard(cardId);
   const git = simpleGit(repoRoot);
   const baseBranch = opts.baseBranch ?? (await git.revparse(["--abbrev-ref", "HEAD"])).trim();
   const baseCommitSha = (await git.revparse(["HEAD"])).trim();

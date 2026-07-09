@@ -1,16 +1,19 @@
-import { execSync } from "node:child_process";
 import { simpleGit } from "simple-git";
 import { eq } from "drizzle-orm";
 import { db } from "@loopeng/db";
 import { cards, deployRecords, gateDefinitions, gateResults } from "@loopeng/db";
 import { applyTransition } from "@loopeng/board-engine";
-import { getActiveWorktree, teardownWorktree } from "@loopeng/worktree-manager";
+import { getActiveWorktree, InvalidRepoError, resolveRepoRootForCard, teardownWorktree } from "@loopeng/worktree-manager";
 import { dockerComposeProvider } from "./providers/docker-compose.js";
 import type { DeployProvider } from "./types.js";
 
-function resolveRepoRoot(): string {
-  if (process.env.TARGET_REPO_PATH) return process.env.TARGET_REPO_PATH;
-  return execSync("git rev-parse --show-toplevel", { encoding: "utf-8" }).trim();
+async function recordRepoValidGate(cardId: string, passed: boolean, detail: Record<string, unknown>) {
+  const [gateDef] = await db.select().from(gateDefinitions).where(eq(gateDefinitions.key, "repo_valid"));
+  if (!gateDef) {
+    console.warn("[deploy-engine] repo_valid gate_definition not seeded, skipping gate_results row");
+    return;
+  }
+  await db.insert(gateResults).values({ cardId, gateDefinitionId: gateDef.id, status: passed ? "passed" : "failed", detail });
 }
 
 async function recordDeployLiveGate(cardId: string, passed: boolean, detail: Record<string, unknown>) {
@@ -41,7 +44,21 @@ export async function runDeployPipeline(cardId: string, provider: DeployProvider
   const worktree = await getActiveWorktree(cardId);
   if (!worktree) throw new Error(`no active worktree for card ${cardId}`);
 
-  const repoRoot = resolveRepoRoot();
+  let repoRoot: string;
+  try {
+    repoRoot = await resolveRepoRootForCard(cardId);
+  } catch (err) {
+    // The project's repo can go missing/invalid any time between worktree
+    // creation and deploy (e.g. .git deleted). Same failure class as the
+    // pre-worktree check in the orchestrator loop -- must not throw
+    // uncaught, since that would just get swallowed by the event-trigger's
+    // bare .catch(console.error) and leave the card stuck in "deploying"
+    // forever with no blockedReason.
+    const reason = err instanceof InvalidRepoError ? err.message : `repo resolution failed: ${(err as Error).message}`;
+    await recordRepoValidGate(cardId, false, { reason });
+    await applyTransition({ cardId, toState: "blocked", actorType: "automation" });
+    return { status: "blocked" };
+  }
   const git = simpleGit(repoRoot);
   const baseBranch = (await git.revparse(["--abbrev-ref", "HEAD"])).trim();
   const preDeploySha = (await git.revparse(["HEAD"])).trim();

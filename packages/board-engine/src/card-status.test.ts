@@ -28,6 +28,29 @@ describe("buildBlockedReasonMap", () => {
     expect(result.get("card-1")).toBe("security_scan failed");
   });
 
+  it("prefers a failing gate's specific detail.reason over the generic '<key> failed' message", () => {
+    const gateRows: FailingGateRow[] = [
+      {
+        cardId: "card-1",
+        gateKey: "repo_valid",
+        detail: { reason: "target repo missing or not a git repository: /bad/path" },
+        createdAt: new Date("2026-01-01T00:00:00Z"),
+      },
+    ];
+
+    const result = buildBlockedReasonMap(["card-1"], gateRows, []);
+    expect(result.get("card-1")).toBe("target repo missing or not a git repository: /bad/path");
+  });
+
+  it("falls back to the generic '<key> failed' message when detail has no reason field", () => {
+    const gateRows: FailingGateRow[] = [
+      { cardId: "card-1", gateKey: "tests_ci", detail: { exitCode: 1 }, createdAt: new Date("2026-01-01T00:00:00Z") },
+    ];
+
+    const result = buildBlockedReasonMap(["card-1"], gateRows, []);
+    expect(result.get("card-1")).toBe("tests_ci failed");
+  });
+
   it("picks the rejected agent run when it is more recent than any failing gate", () => {
     const gateRows: FailingGateRow[] = [
       { cardId: "card-1", gateKey: "security_scan", createdAt: new Date("2026-01-01T00:00:00Z") },

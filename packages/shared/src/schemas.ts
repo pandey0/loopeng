@@ -90,10 +90,25 @@ export const SkillSchema = z.object({
 });
 export type Skill = z.infer<typeof SkillSchema>;
 
+export const ProjectSchema = z.object({
+  id: uuid,
+  name: z.string().min(1),
+  repoPath: z.string().min(1),
+  createdAt: isoDate,
+});
+export type Project = z.infer<typeof ProjectSchema>;
+
+export const ProjectCreateInputSchema = z.object({
+  name: z.string().min(1),
+  repoPath: z.string().min(1),
+});
+export type ProjectCreateInput = z.infer<typeof ProjectCreateInputSchema>;
+
 export const BoardSchema = z.object({
   id: uuid,
   name: z.string().min(1),
   description: z.string().nullable(),
+  projectId: uuid.nullable(),
   createdAt: isoDate,
 });
 export type Board = z.infer<typeof BoardSchema>;

@@ -29,6 +29,7 @@ async function computeBlockedReasons(cardIds: string[]): Promise<Map<string, str
       .select({
         cardId: gateResults.cardId,
         gateKey: gateDefinitions.key,
+        detail: gateResults.detail,
         createdAt: gateResults.createdAt,
       })
       .from(gateResults)
@@ -65,6 +66,7 @@ async function computeBlockedReasons(cardIds: string[]): Promise<Map<string, str
 export interface FailingGateRow {
   cardId: string | null;
   gateKey: string | null;
+  detail?: unknown;
   createdAt: Date;
 }
 
@@ -102,7 +104,15 @@ export function buildBlockedReasonMap(
       if (row.cardId !== cardId || !row.gateKey) continue;
       if (!bestAt || row.createdAt > bestAt) {
         bestAt = row.createdAt;
-        bestReason = `${row.gateKey} failed`;
+        // Prefer the gate's own specific reason (e.g. "target repo missing or
+        // not a git repository") over the generic "<key> failed" -- some
+        // gates (repo_valid) write a detail.reason precisely so this map
+        // doesn't have to fall back to a vague message for them.
+        const detailReason =
+          row.detail && typeof row.detail === "object" && "reason" in row.detail && typeof (row.detail as { reason: unknown }).reason === "string"
+            ? (row.detail as { reason: string }).reason
+            : null;
+        bestReason = detailReason ?? `${row.gateKey} failed`;
       }
     }
 
