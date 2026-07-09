@@ -29,6 +29,7 @@ export function toHighSignalToast(event: ActivityEvent): HighSignalToast | null 
   if (event.eventType === "card.moved") {
     const { to } = event.payload as { from?: string; to?: string };
     if (to === "blocked") return { title: "Card blocked", description: describeEvent(event), tone: "destructive" };
+    if (to === "deploy_failed") return { title: "Deploy failed", description: describeEvent(event), tone: "destructive" };
     if (to === "done") return { title: "Card done", description: describeEvent(event), tone: "success" };
     return null;
   }

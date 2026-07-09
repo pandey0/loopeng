@@ -39,3 +39,23 @@ describe("canTransition", () => {
     expect(canTransition("ready", "ready")).toBe(false);
   });
 });
+
+describe("deploy_failed recovery", () => {
+  it("routes a deploy failure to deploy_failed, not blocked", () => {
+    expect(canTransition("deploying", "deploy_failed")).toBe(true);
+    expect(canTransition("deploying", "blocked")).toBe(false);
+  });
+
+  it("allows retrying just the deploy step, without re-approval", () => {
+    expect(canTransition("deploy_failed", "deploying")).toBe(true);
+  });
+
+  it("still allows escalating to a full re-implementation cycle when the code itself needs to change", () => {
+    expect(canTransition("deploy_failed", "blocked")).toBe(true);
+    expect(canTransition("blocked", "ready")).toBe(true);
+  });
+
+  it("does not let a deploy_failed card skip straight to done", () => {
+    expect(canTransition("deploy_failed", "done")).toBe(false);
+  });
+});

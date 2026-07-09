@@ -63,7 +63,7 @@ export function CardTile({ card, draggable = true, highlighted = false, onDragSt
       {card.blockedReason && (
         <div className="mt-1.5 flex items-center gap-1 text-[11px] font-medium text-destructive">
           <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-destructive" />
-          Blocked: {card.blockedReason}
+          {card.state === "deploy_failed" ? "Deploy failed" : "Blocked"}: {card.blockedReason}
         </div>
       )}
       {isActive && (

@@ -125,6 +125,7 @@ export const STATUS_META: Record<StatusKey, StatusMeta> = {
   gate_checks: meta("Gate Checks", "info", SpinnerIcon),
   awaiting_approval: meta("Awaiting Approval", "warning", PauseIcon),
   deploying: meta("Deploying", "info", SpinnerIcon),
+  deploy_failed: meta("Deploy Failed", "destructive", CrossIcon),
   done: meta("Done", "success", CheckIcon),
   blocked: meta("Blocked", "destructive", CrossIcon),
   cancelled: meta("Cancelled", "neutral", CrossIcon),
