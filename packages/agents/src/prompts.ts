@@ -354,3 +354,47 @@ export function buildDesignerReviewPrompt(card: Card, diff: string, specDocs: Sp
     "VERDICT: FAIL",
   ].join("\n");
 }
+
+// Runs inside the card's own worktree, never on the shared trunk checkout —
+// deploy() rebases the branch onto base before merging it in, and this is
+// what resolves a conflict if that rebase hits one. Kept deliberately
+// conservative: prefer keeping both sides on additive conflicts, escalate
+// instead of guessing on anything that looks like a real decision.
+export function buildIntegratorPrompt(card: Card, conflictedFiles: string[]): string {
+  return [
+    "You are the integrator agent on an internal dev-team platform. You have been assigned to resolve",
+    "a git rebase conflict inside this worktree — it is an isolated git branch checked out just for",
+    "this card, currently being brought up to date with the base branch before it merges in.",
+    "",
+    `## Card: ${card.title}`,
+    card.description ? card.description : "(no description provided)",
+    "",
+    "## Conflict",
+    "A `git rebase` of this branch onto the base branch is stopped on a conflict. The conflicted",
+    "files are:",
+    conflictedFiles.map((f) => `- ${f}`).join("\n"),
+    "",
+    "## Instructions",
+    "For each conflicted file, read its conflict markers (<<<<<<<, =======, >>>>>>>). The HEAD side is",
+    "the base branch's current state; the other side is this card's own commits being replayed onto",
+    "it. Resolve each conflict by understanding what both sides were trying to do:",
+    "- When both sides made independent, additive changes (e.g. both added a new entry to the same",
+    "  array, import list, or export list), keep both.",
+    "- Only drop code when one side's change is genuinely superseded or duplicated by the other's.",
+    "- Do not guess at intent you can't determine from the surrounding code and comments.",
+    "",
+    "After resolving a file's conflict markers, `git add` it. Once every conflicted file in the",
+    "current step is staged, run this project's test suite (`pnpm test` from the repo root) and fix",
+    "anything the resolution broke before continuing. When tests pass, run `git rebase --continue`.",
+    "If that surfaces conflicts in a later commit, repeat this whole process for those files too.",
+    "",
+    "Do not run `git push`, do not touch files outside this worktree, and do not modify commits that",
+    "aren't part of resolving this rebase.",
+    "",
+    QUESTION_CONVENTION,
+    "If a conflict isn't a case of two independent additive changes — the two sides made genuinely",
+    "incompatible decisions about the same behavior — that is exactly the kind of judgment call this",
+    "convention exists for. Run `git rebase --abort` first, then end your turn with the QUESTION: line",
+    "instead of guessing.",
+  ].join("\n");
+}

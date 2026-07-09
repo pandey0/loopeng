@@ -19,6 +19,7 @@ import {
   buildDesignerReviewPrompt,
   buildDesignerSpecPrompt,
   buildImplementerPrompt,
+  buildIntegratorPrompt,
   buildManagerPrompt,
   buildPlannerPrompt,
   buildReviewerPrompt,
@@ -545,4 +546,55 @@ export async function runDesignerReviewAgent(card: Card): Promise<ReviewerRunRes
     .where(eq(agentRuns.id, run.id));
 
   return { agentRunId: run.id, isError: result.isError, resultText: result.resultText, costUsd: result.totalCostUsd, logsRef, verdict };
+}
+
+// Called from deploy-engine's docker-compose provider when rebasing a card's
+// branch onto base (before merging into the shared trunk checkout) hits a
+// conflict. Runs inside the card's own worktree with full tool access — same
+// isolation boundary as the implementer, just a narrower job: resolve the
+// conflict markers, run tests, `git rebase --continue`.
+export async function runIntegratorAgent(
+  card: Card,
+  worktree: { id: string; fsPath: string },
+  conflictedFiles: string[],
+): Promise<AgentRunResult> {
+  const roleId = await getRoleId("integrator");
+  const prompt = buildIntegratorPrompt(card, conflictedFiles);
+
+  const [run] = await db
+    .insert(agentRuns)
+    .values({ cardId: card.id, agentRoleId: roleId, worktreeId: worktree.id, status: "running", startedAt: new Date() })
+    .returning();
+  if (!run) throw new Error("failed to insert agent_runs row");
+
+  const mcpConfig = buildSubAgentMcpConfig({
+    parentAgentRunId: run.id,
+    cardId: card.id,
+    worktreeId: worktree.id,
+    cwd: worktree.fsPath,
+    depth: 1,
+  });
+  const result = await runClaudeCliStreamingOnce({
+    cwd: worktree.fsPath,
+    agentRunId: run.id,
+    prompt,
+    permissionMode: "bypassPermissions",
+    mcpConfig,
+  });
+  const logsRef = await writeAgentLog(run.id, result.raw);
+  const question = !result.isError ? extractQuestion(result.resultText) : null;
+
+  await db
+    .update(agentRuns)
+    .set({ status: result.isError ? "failed" : "succeeded", logsRef, finishedAt: new Date() })
+    .where(eq(agentRuns.id, run.id));
+
+  return {
+    agentRunId: run.id,
+    isError: result.isError,
+    resultText: result.resultText,
+    costUsd: result.totalCostUsd,
+    logsRef,
+    question: question ?? undefined,
+  };
 }

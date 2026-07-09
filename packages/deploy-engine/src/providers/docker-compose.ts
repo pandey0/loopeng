@@ -1,5 +1,6 @@
 import { simpleGit } from "simple-git";
 import { execIn } from "../exec.js";
+import { syncWorktreeOntoBase } from "../sync.js";
 import type { DeployContext, DeployProvider, DeployResult, HealthStatus } from "../types.js";
 
 // Resolved once, reused for both the docker build args and the health-check
@@ -59,6 +60,18 @@ export const dockerComposeProvider: DeployProvider = {
     const status = await git.status();
     if (!status.isClean()) {
       return { status: "failed", createdNewCommit: false, detail: { reason: "repo has uncommitted changes, refusing to merge", files: status.files.map((f) => f.path) } };
+    }
+
+    // Bring the card's branch up to date with base *inside its own worktree*
+    // first. Most conflicts vanish here because the branch already contains
+    // base's changes afterward, so the merge below becomes a clean fast-
+    // forward-able no-ff instead of a conflict on the shared trunk. If the
+    // rebase itself conflicts, this resolves it in the worktree (isolated,
+    // low blast radius) rather than ever attempting automated resolution on
+    // the checkout every other card's deploy also depends on.
+    const sync = await syncWorktreeOntoBase(ctx);
+    if (!sync.ok) {
+      return { status: "failed", createdNewCommit: false, detail: { step: "rebase_sync", ...sync.detail } };
     }
 
     const preMergeSha = (await git.revparse(["HEAD"])).trim();

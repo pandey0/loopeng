@@ -212,6 +212,9 @@ importers:
 
   packages/deploy-engine:
     dependencies:
+      '@loopeng/agents':
+        specifier: workspace:*
+        version: link:../agents
       '@loopeng/board-engine':
         specifier: workspace:*
         version: link:../board-engine
@@ -234,6 +237,9 @@ importers:
       typescript:
         specifier: ^5.6.3
         version: 5.9.3
+      vitest:
+        specifier: ^3.2.6
+        version: 3.2.6(@types/debug@4.1.13)(@types/node@22.20.0)
 
   packages/doc-engine:
     dependencies:

@@ -58,6 +58,12 @@ async function main() {
         "Engages UI/UX-touching cards at two points: an upstream design spec before the implementer starts, and a downstream design review parallel to code review",
       capabilities: ["design"],
     },
+    {
+      name: "integrator",
+      description:
+        "Resolves a git rebase conflict inside a card's own worktree when its branch is synced onto the base branch before deploy, so trunk never sees an unresolved merge",
+      capabilities: ["integration"],
+    },
   ]);
 
   await db.insert(gateDefinitions).values([
