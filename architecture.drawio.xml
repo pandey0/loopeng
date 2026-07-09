@@ -1,0 +1,176 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mxfile host="app.diagrams.net" agent="claude-code" version="24.0.0" type="device">
+  <diagram id="loopeng-architecture" name="Architecture">
+    <mxGraphModel dx="2200" dy="1400" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="2000" pageHeight="2000" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+
+        <!-- Browser -->
+        <mxCell id="browser" value="User / Browser" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontSize=12;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="880" y="40" width="200" height="50" as="geometry" />
+        </mxCell>
+
+        <!-- Docker boundary -->
+        <mxCell id="dockerBoundary" value="Docker Compose  (infrastructure/docker/docker-compose.yml)" style="rounded=0;whiteSpace=wrap;html=1;dashed=1;fillColor=none;strokeColor=#666666;verticalAlign=top;align=left;fontSize=14;fontStyle=1;spacing=8;" vertex="1" parent="1">
+          <mxGeometry x="520" y="130" width="1200" height="770" as="geometry" />
+        </mxCell>
+
+        <!-- web -->
+        <mxCell id="web" value="apps/web  --  Next.js  (:3000)&#10;&#10;Routes:&#10;- /board/[boardId]&#10;- /board/[boardId]/graph&#10;- /card/[cardId]&#10;- /docs, /docs/new, /docs/new/adr, /docs/[slug]&#10;- /activity&#10;- /shell&#10;&#10;lib/api.ts (REST client)&#10;lib/events.ts (SSE client)&#10;&#10;deps: @loopeng/shared, @loopeng/ui" style="rounded=0;whiteSpace=wrap;html=0;align=left;verticalAlign=top;spacing=8;fontSize=11;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="1">
+          <mxGeometry x="560" y="180" width="520" height="250" as="geometry" />
+        </mxCell>
+
+        <!-- api -->
+        <mxCell id="api" value="apps/api  --  Fastify  (:4000)&#10;&#10;Plugins: cors, db, error-handler, orchestrator, websocket&#10;&#10;Routes:&#10;GET /health&#10;GET/POST /docs, /docs/:slug, /docs/:slug/versions, /docs/templates/:docType&#10;GET/POST /boards, /boards/:id&#10;GET/POST/PATCH /cards, /cards/:id/dependencies, /detail, /diff,&#10;  /doc-links, /dispatch, /transition, /questions/:id/answer&#10;GET /events, /events/stream (SSE)&#10;GET/POST /boards/:id/intake, /boards/:id/intake/:agentRunId&#10;GET /agent-runs/:id/socket (WS)&#10;&#10;deps: agents, board-engine, db, doc-engine,&#10;orchestrator, shared, worktree-manager" style="rounded=0;whiteSpace=wrap;html=0;align=left;verticalAlign=top;spacing=8;fontSize=11;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="1">
+          <mxGeometry x="560" y="460" width="520" height="400" as="geometry" />
+        </mxCell>
+
+        <!-- postgres -->
+        <mxCell id="postgres" value="PostgreSQL 16-alpine  (:5433 -&gt; 5432)&#10;&#10;20 tables (packages/db/src/schema.ts):&#10;users, docs, doc_versions, adrs, skills,&#10;boards, cards, card_doc_links, card_dependencies,&#10;card_questions, agent_roles, agent_runs, worktrees,&#10;gate_definitions, gate_results, deploy_records,&#10;automations, automation_runs, connectors, event_log&#10;&#10;5 migrations in packages/db/migrations/" style="rounded=0;whiteSpace=wrap;html=0;align=left;verticalAlign=top;spacing=8;fontSize=11;fillColor=#f8cecc;strokeColor=#b85450;" vertex="1" parent="1">
+          <mxGeometry x="1140" y="180" width="540" height="460" as="geometry" />
+        </mxCell>
+
+        <!-- pgdata volume -->
+        <mxCell id="pgdata" value="volume: pgdata&#10;(postgres data directory)" style="rounded=0;whiteSpace=wrap;html=0;align=left;verticalAlign=top;spacing=8;fontSize=11;fillColor=#ffffff;strokeColor=#b85450;dashed=1;" vertex="1" parent="1">
+          <mxGeometry x="1140" y="650" width="260" height="100" as="geometry" />
+        </mxCell>
+
+        <!-- wiki-repo volume -->
+        <mxCell id="wikirepoVol" value="volume: wiki-repo&#10;mounted at /data/wiki-repo&#10;(git repo: docs / adr / rfc / wiki / skills)" style="rounded=0;whiteSpace=wrap;html=0;align=left;verticalAlign=top;spacing=8;fontSize=11;fillColor=#ffffff;strokeColor=#b85450;dashed=1;" vertex="1" parent="1">
+          <mxGeometry x="1420" y="650" width="260" height="100" as="geometry" />
+        </mxCell>
+
+        <!-- orchestrator -->
+        <mxCell id="orchestrator" value="packages/orchestrator&#10;&#10;queue.ts (BullMQ), loop.ts, router.ts, hooks.ts&#10;&#10;coordination/&#10;- hierarchical.ts&#10;- mesh.ts&#10;&#10;triggers/&#10;- cron-trigger.ts&#10;- event-trigger.ts&#10;&#10;deps: agents, board-engine, connectors, db,&#10;deploy-engine, doc-engine, gates, shared, worktree-manager" style="rounded=0;whiteSpace=wrap;html=0;align=left;verticalAlign=top;spacing=8;fontSize=11;fillColor=#ffe6cc;strokeColor=#d79b00;" vertex="1" parent="1">
+          <mxGeometry x="560" y="940" width="520" height="260" as="geometry" />
+        </mxCell>
+
+        <!-- db package -->
+        <mxCell id="dbpkg" value="packages/db&#10;&#10;client.ts, schema.ts,&#10;migrate.ts, seed.ts, index.ts&#10;&#10;drizzle-orm data access layer&#10;&#10;deps: shared" style="rounded=0;whiteSpace=wrap;html=0;align=left;verticalAlign=top;spacing=8;fontSize=11;fillColor=#f8cecc;strokeColor=#b85450;" vertex="1" parent="1">
+          <mxGeometry x="1140" y="940" width="280" height="260" as="geometry" />
+        </mxCell>
+
+        <!-- domain packages row1 -->
+        <mxCell id="agents" value="packages/agents&#10;&#10;claude-cli.ts (spawns Claude CLI)&#10;decomposition.ts, prompts.ts&#10;(Planner / Manager / Designer /&#10;Implementer / Reviewer prompts)&#10;questions.ts, roles.ts,&#10;sub-agent.ts, logs.ts&#10;&#10;deps: db, doc-engine, shared,&#10;worktree-manager" style="rounded=0;whiteSpace=wrap;html=0;align=left;verticalAlign=top;spacing=8;fontSize=11;fillColor=#fff2cc;strokeColor=#d6b656;" vertex="1" parent="1">
+          <mxGeometry x="40" y="1240" width="280" height="210" as="geometry" />
+        </mxCell>
+
+        <mxCell id="boardengine" value="packages/board-engine&#10;&#10;card-status.ts&#10;dependency-graph.ts&#10;state-machine.ts&#10;(card lifecycle / kanban&#10;state machine)&#10;&#10;deps: db, shared" style="rounded=0;whiteSpace=wrap;html=0;align=left;verticalAlign=top;spacing=8;fontSize=11;fillColor=#fff2cc;strokeColor=#d6b656;" vertex="1" parent="1">
+          <mxGeometry x="340" y="1240" width="280" height="210" as="geometry" />
+        </mxCell>
+
+        <mxCell id="connectors" value="packages/connectors&#10;&#10;github.ts, linear.ts, slack.ts,&#10;registry.ts, types.ts&#10;&#10;deps: db, shared" style="rounded=0;whiteSpace=wrap;html=0;align=left;verticalAlign=top;spacing=8;fontSize=11;fillColor=#fff2cc;strokeColor=#d6b656;" vertex="1" parent="1">
+          <mxGeometry x="640" y="1240" width="280" height="210" as="geometry" />
+        </mxCell>
+
+        <mxCell id="deployengine" value="packages/deploy-engine&#10;&#10;exec.ts, pipeline.ts&#10;providers/docker-compose.ts&#10;&#10;deps: board-engine, db, shared,&#10;worktree-manager" style="rounded=0;whiteSpace=wrap;html=0;align=left;verticalAlign=top;spacing=8;fontSize=11;fillColor=#fff2cc;strokeColor=#d6b656;" vertex="1" parent="1">
+          <mxGeometry x="940" y="1240" width="280" height="210" as="geometry" />
+        </mxCell>
+
+        <!-- domain packages row2 -->
+        <mxCell id="docengine" value="packages/doc-engine&#10;&#10;drift.ts (doc/code drift check)&#10;frontmatter.ts&#10;git-client.ts (wiki-repo git ops)&#10;&#10;deps: db, shared" style="rounded=0;whiteSpace=wrap;html=0;align=left;verticalAlign=top;spacing=8;fontSize=11;fillColor=#fff2cc;strokeColor=#d6b656;" vertex="1" parent="1">
+          <mxGeometry x="40" y="1470" width="280" height="210" as="geometry" />
+        </mxCell>
+
+        <mxCell id="gates" value="packages/gates&#10;&#10;exec.ts, pipeline.ts, registry.ts,&#10;ui-detection.ts&#10;checks/: adr-required, ci-status,&#10;doc-linked, security-scan, test-runner&#10;&#10;deps: connectors, db, doc-engine,&#10;shared, worktree-manager" style="rounded=0;whiteSpace=wrap;html=0;align=left;verticalAlign=top;spacing=8;fontSize=11;fillColor=#fff2cc;strokeColor=#d6b656;" vertex="1" parent="1">
+          <mxGeometry x="340" y="1470" width="280" height="210" as="geometry" />
+        </mxCell>
+
+        <mxCell id="worktreemanager" value="packages/worktree-manager&#10;&#10;manages per-card git worktrees&#10;(index.ts)&#10;&#10;deps: db, shared" style="rounded=0;whiteSpace=wrap;html=0;align=left;verticalAlign=top;spacing=8;fontSize=11;fillColor=#fff2cc;strokeColor=#d6b656;" vertex="1" parent="1">
+          <mxGeometry x="640" y="1470" width="280" height="210" as="geometry" />
+        </mxCell>
+
+        <mxCell id="mcpsubagent" value="packages/mcp-subagent&#10;&#10;server.ts&#10;(MCP server exposing&#10;sub-agent tools/capabilities)&#10;&#10;deps: agents, db" style="rounded=0;whiteSpace=wrap;html=0;align=left;verticalAlign=top;spacing=8;fontSize=11;fillColor=#fff2cc;strokeColor=#d6b656;" vertex="1" parent="1">
+          <mxGeometry x="940" y="1470" width="280" height="210" as="geometry" />
+        </mxCell>
+
+        <!-- shared / ui -->
+        <mxCell id="shared" value="packages/shared&#10;&#10;common types &amp; utilities&#10;&#10;deps: (none)" style="rounded=0;whiteSpace=wrap;html=0;align=left;verticalAlign=top;spacing=8;fontSize=11;fillColor=#e1d5e7;strokeColor=#9673a6;" vertex="1" parent="1">
+          <mxGeometry x="1260" y="1240" width="230" height="100" as="geometry" />
+        </mxCell>
+
+        <mxCell id="ui" value="packages/ui&#10;&#10;React component library&#10;&#10;deps: shared" style="rounded=0;whiteSpace=wrap;html=0;align=left;verticalAlign=top;spacing=8;fontSize=11;fillColor=#e1d5e7;strokeColor=#9673a6;" vertex="1" parent="1">
+          <mxGeometry x="1260" y="1360" width="230" height="100" as="geometry" />
+        </mxCell>
+
+        <!-- external / local data row -->
+        <mxCell id="claude" value="Claude CLI / Anthropic API&#10;&#10;invoked as subprocess by&#10;agents/claude-cli.ts to run&#10;AI agent roles" style="rounded=0;whiteSpace=wrap;html=0;align=left;verticalAlign=top;spacing=8;fontSize=11;fillColor=#f5f5f5;strokeColor=#666666;dashed=1;" vertex="1" parent="1">
+          <mxGeometry x="40" y="1720" width="260" height="200" as="geometry" />
+        </mxCell>
+
+        <mxCell id="github" value="GitHub&#10;&#10;via connectors/github.ts" style="rounded=0;whiteSpace=wrap;html=0;align=left;verticalAlign=top;spacing=8;fontSize=11;fillColor=#f5f5f5;strokeColor=#666666;dashed=1;" vertex="1" parent="1">
+          <mxGeometry x="320" y="1720" width="260" height="200" as="geometry" />
+        </mxCell>
+
+        <mxCell id="linear" value="Linear&#10;&#10;via connectors/linear.ts" style="rounded=0;whiteSpace=wrap;html=0;align=left;verticalAlign=top;spacing=8;fontSize=11;fillColor=#f5f5f5;strokeColor=#666666;dashed=1;" vertex="1" parent="1">
+          <mxGeometry x="600" y="1720" width="260" height="200" as="geometry" />
+        </mxCell>
+
+        <mxCell id="slack" value="Slack&#10;&#10;via connectors/slack.ts" style="rounded=0;whiteSpace=wrap;html=0;align=left;verticalAlign=top;spacing=8;fontSize=11;fillColor=#f5f5f5;strokeColor=#666666;dashed=1;" vertex="1" parent="1">
+          <mxGeometry x="880" y="1720" width="260" height="200" as="geometry" />
+        </mxCell>
+
+        <mxCell id="redis" value="Redis&#10;&#10;BullMQ / ioredis queue backend&#10;for packages/orchestrator&#10;&#10;(not defined in docker-compose.yml&#10;-- external / dev dependency)" style="rounded=0;whiteSpace=wrap;html=0;align=left;verticalAlign=top;spacing=8;fontSize=11;fillColor=#f5f5f5;strokeColor=#666666;dashed=1;" vertex="1" parent="1">
+          <mxGeometry x="1160" y="1720" width="260" height="200" as="geometry" />
+        </mxCell>
+
+        <mxCell id="worktreesdir" value="data/worktrees&#10;&#10;on-disk git worktrees per card&#10;(local filesystem)" style="rounded=0;whiteSpace=wrap;html=0;align=left;verticalAlign=top;spacing=8;fontSize=11;fillColor=#f5f5f5;strokeColor=#666666;dashed=1;" vertex="1" parent="1">
+          <mxGeometry x="1440" y="1720" width="260" height="200" as="geometry" />
+        </mxCell>
+
+        <mxCell id="agentlogsdir" value="data/agent-logs&#10;&#10;agent run transcripts / logs&#10;(local filesystem)" style="rounded=0;whiteSpace=wrap;html=0;align=left;verticalAlign=top;spacing=8;fontSize=11;fillColor=#f5f5f5;strokeColor=#666666;dashed=1;" vertex="1" parent="1">
+          <mxGeometry x="1720" y="1720" width="260" height="200" as="geometry" />
+        </mxCell>
+
+        <!-- edges -->
+        <mxCell id="e1" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;fontSize=10;" edge="1" parent="1" source="browser" target="web">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e2" value="REST / WS  (NEXT_PUBLIC_API_URL)" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;fontSize=10;" edge="1" parent="1" source="web" target="api">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e3" value="drizzle client (plugins/db.ts)" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;fontSize=10;" edge="1" parent="1" source="api" target="dbpkg">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e4" value="drizzle-orm" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;fontSize=10;" edge="1" parent="1" source="dbpkg" target="postgres">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e5" value="registers orchestrator plugin&#10;dispatch on card transitions" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;fontSize=10;" edge="1" parent="1" source="api" target="orchestrator">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e6" value="read/write docs" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;fontSize=10;" edge="1" parent="1" source="api" target="wikirepoVol">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e7" value="BullMQ / ioredis" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;fontSize=10;" edge="1" parent="1" source="orchestrator" target="redis">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e8" value="spawns subprocess" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;fontSize=10;" edge="1" parent="1" source="agents" target="claude">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e9" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;fontSize=10;" edge="1" parent="1" source="connectors" target="github">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e10" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;fontSize=10;" edge="1" parent="1" source="connectors" target="linear">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e11" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;fontSize=10;" edge="1" parent="1" source="connectors" target="slack">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e12" value="git-client.ts" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;fontSize=10;" edge="1" parent="1" source="docengine" target="wikirepoVol">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e13" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;fontSize=10;" edge="1" parent="1" source="worktreemanager" target="worktreesdir">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e14" value="logs.ts" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;fontSize=10;" edge="1" parent="1" source="agents" target="agentlogsdir">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e15" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;fontSize=10;" edge="1" parent="1" source="postgres" target="pgdata">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>
