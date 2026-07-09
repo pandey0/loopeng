@@ -218,6 +218,7 @@ export const api = {
     title: string;
     docType: string;
     content: string;
+    summary: string;
     tags?: string[];
     message?: string;
   }) => request<Doc>("/docs", { method: "POST", body: JSON.stringify(input) }),

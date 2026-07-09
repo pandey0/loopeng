@@ -8,6 +8,10 @@ dist/
 data/wiki-repo/
 data/worktrees/
 data/agent-logs/
+# Safety net for a misconfigured WIKI_REPO_PATH (e.g. in a test run): doc-engine
+# falls back to a cwd-relative data/wiki-repo, which under a package dir would
+# otherwise be a package-local variant of the same throwaway path above.
+**/data/wiki-repo/
 **/data/agent-logs/
 tmp-scripts/
 .claude/

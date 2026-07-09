@@ -28,6 +28,7 @@ export default function NewAdrPage() {
         title: values.title,
         docType: "adr",
         content: values.content,
+        summary: values.summary,
         tags: values.tags,
         message: `create ADR: ${values.title}`,
       });

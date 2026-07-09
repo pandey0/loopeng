@@ -18,6 +18,16 @@ import {
 const uuid = z.string().uuid();
 const isoDate = z.coerce.date();
 
+// Enforced everywhere a doc's frontmatter summary is written (createDoc/updateDoc):
+// one line, no newlines, short enough to stay cheap when every linked doc
+// contributes one to a prompt (see doc-summary formatting in @loopeng/agents).
+export const docSummarySchema = z
+  .string()
+  .trim()
+  .min(1, "summary is required")
+  .max(200, "summary must be at most 200 characters")
+  .refine((s) => !s.includes("\n"), "summary must be a single line");
+
 export const UserSchema = z.object({
   id: uuid,
   email: z.string().email(),
@@ -34,6 +44,7 @@ export const DocSchema = z.object({
   docType: z.enum(DOC_TYPES),
   repoPath: z.string().min(1),
   latestCommitSha: z.string().nullable(),
+  summary: docSummarySchema,
   status: z.enum(DOC_STATUSES).default("draft"),
   tags: z.array(z.string()).default([]),
   createdBy: uuid.nullable(),
@@ -47,6 +58,7 @@ export const DocCreateInputSchema = z.object({
   title: z.string().min(1),
   docType: z.enum(DOC_TYPES),
   content: z.string(),
+  summary: docSummarySchema,
   tags: z.array(z.string()).default([]),
   authorId: uuid.optional(),
   message: z.string().min(1).default("create doc"),
@@ -55,6 +67,7 @@ export type DocCreateInput = z.infer<typeof DocCreateInputSchema>;
 
 export const DocUpdateInputSchema = z.object({
   content: z.string(),
+  summary: docSummarySchema.optional(),
   authorId: uuid.optional(),
   message: z.string().min(1).default("update doc"),
   status: z.enum(DOC_STATUSES).optional(),

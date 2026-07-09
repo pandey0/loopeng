@@ -30,6 +30,7 @@ async function main() {
       "## Summary\n\nThrowaway spec doc for the card-C full-pipeline verification script. " +
       "Confirms dispatch -> implementer -> reviewer -> gate pipeline still works after the " +
       "roles.ts migration to runClaudeCliStreamingOnce.",
+    summary: "Throwaway spec doc for the card-C full-pipeline e2e verification script.",
     tags: [],
     message: "e2e pipeline verification doc",
   });

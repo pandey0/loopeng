@@ -4,6 +4,7 @@ import { cardQuestions, cards, eventLog, gateDefinitions, gateResults } from "@l
 import { applyTransition } from "@loopeng/board-engine";
 import { createWorktree, getActiveWorktree } from "@loopeng/worktree-manager";
 import {
+  distillFailureNote,
   hasDesignerSpecDoc,
   resolveQuestionRouting,
   runDesignerReviewAgent,
@@ -135,7 +136,7 @@ export async function orchestrateCard(cardId: string, hooks: HookRegistry): Prom
 
     if (implResult.isError) {
       if (attempt < MAX_ATTEMPTS) {
-        priorFailureNote = `Implementer run failed: ${implResult.resultText.slice(0, 2000)}`;
+        priorFailureNote = distillFailureNote("implementer_error", implResult.resultText);
         continue; // retry in the same worktree, still in_progress
       }
       await applyTransition({ cardId, toState: "blocked", actorType: "agent" });
@@ -168,7 +169,7 @@ export async function orchestrateCard(cardId: string, hooks: HookRegistry): Prom
       if (attempt < MAX_ATTEMPTS) {
         await applyTransition({ cardId, toState: "blocked", actorType: "agent" });
         await applyTransition({ cardId, toState: "in_progress", actorType: "agent" });
-        priorFailureNote = `Reviewer rejected the previous attempt: ${reviewResult.resultText.slice(0, 2000)}`;
+        priorFailureNote = distillFailureNote("review_rejected", reviewResult.resultText);
         continue;
       }
       await applyTransition({ cardId, toState: "blocked", actorType: "agent" });

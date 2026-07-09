@@ -1,7 +1,7 @@
 import { and, desc, eq } from "drizzle-orm";
 import { db } from "@loopeng/db";
 import { agentRoles, agentRuns, cardDependencies, cardDocLinks, cardQuestions, cards, docs as docsTable } from "@loopeng/db";
-import { createDoc, getDoc, listDocs } from "@loopeng/doc-engine";
+import { createDoc, listDocs } from "@loopeng/doc-engine";
 
 type Card = typeof cards.$inferSelect;
 import { getActiveWorktree, getRepoDiff, resolveRepoRoot } from "@loopeng/worktree-manager";
@@ -61,6 +61,9 @@ export interface ReviewerRunResult extends AgentRunResult {
   verdict: "pass" | "fail";
 }
 
+// Prompts only need slug + one-line summary per doc (lazy retrieval — see
+// prompts.ts's GET_DOC_CONVENTION), so this stays a plain DB read: no git
+// read, no getDoc() call, for every doc linked/tagged onto a card.
 async function loadRelevantSkills(card: Card): Promise<SkillContext[]> {
   const skillDocs = await listDocs({ docType: "skill" });
   const tagMatched = skillDocs.filter((doc) => doc.tags.some((t) => card.tags.includes(t)));
@@ -74,12 +77,7 @@ async function loadRelevantSkills(card: Card): Promise<SkillContext[]> {
   const byId = new Map(tagMatched.map((d) => [d.id, d]));
   for (const row of linkedRows) byId.set(row.docs.id, row.docs);
 
-  const results: SkillContext[] = [];
-  for (const doc of byId.values()) {
-    const full = await getDoc(doc.slug);
-    if (full) results.push({ title: full.title, body: full.body });
-  }
-  return results;
+  return Array.from(byId.values()).map((doc) => ({ slug: doc.slug, title: doc.title, summary: doc.summary }));
 }
 
 async function loadLinkedSpecDocs(card: Card): Promise<SpecDocContext[]> {
@@ -89,12 +87,21 @@ async function loadLinkedSpecDocs(card: Card): Promise<SpecDocContext[]> {
     .innerJoin(docsTable, eq(cardDocLinks.docId, docsTable.id))
     .where(and(eq(cardDocLinks.cardId, card.id), eq(cardDocLinks.linkType, "spec")));
 
-  const results: SpecDocContext[] = [];
-  for (const row of linkedRows) {
-    const full = await getDoc(row.docs.slug);
-    if (full) results.push({ title: full.title, body: full.body });
-  }
-  return results;
+  return linkedRows.map((row) => ({ slug: row.docs.slug, title: row.docs.title, summary: row.docs.summary }));
+}
+
+// The planner has no card yet (it's what produces one), so there's nothing to
+// filter doc relevance by tags/links — it gets every existing RFC/ADR and
+// skill doc as slug + one-line summary instead, same lazy get_doc contract as
+// the other roles, so it can spot prior decisions before proposing new ones.
+async function loadAllSpecDocs(): Promise<SpecDocContext[]> {
+  const [rfcs, adrs] = await Promise.all([listDocs({ docType: "rfc" }), listDocs({ docType: "adr" })]);
+  return [...rfcs, ...adrs].map((doc) => ({ slug: doc.slug, title: doc.title, summary: doc.summary }));
+}
+
+async function loadAllSkillDocs(): Promise<SkillContext[]> {
+  const skillDocs = await listDocs({ docType: "skill" });
+  return skillDocs.map((doc) => ({ slug: doc.slug, title: doc.title, summary: doc.summary }));
 }
 
 export async function getRoleId(name: string): Promise<string> {
@@ -188,9 +195,12 @@ export interface PlannerRunHandle {
 export async function startPlannerAgent(boardId: string, requestText: string): Promise<PlannerRunHandle> {
   const roleId = await getRoleId("planner");
   const existingCards = await db.select({ title: cards.title }).from(cards).where(eq(cards.boardId, boardId));
+  const [specDocs, skills] = await Promise.all([loadAllSpecDocs(), loadAllSkillDocs()]);
   const prompt = buildPlannerPrompt(
     requestText,
     existingCards.map((c) => c.title),
+    specDocs,
+    skills,
   );
 
   const [run] = await db
@@ -471,6 +481,7 @@ export async function runDesignerSpecAgent(card: Card): Promise<AgentRunResult> 
       slug: `design-spec-${card.id}`,
       title: `Design Spec: ${card.title}`,
       docType: "wiki",
+      summary: `Design spec for "${card.title}"`.slice(0, 200),
       content: specBody,
       tags: [DESIGN_SPEC_DOC_TAG],
       message: `designer spec for card ${card.id}`,

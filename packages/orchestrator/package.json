@@ -7,10 +7,13 @@
   "types": "./src/index.ts",
   "scripts": {
     "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run",
     "verify:e2e": "tsx src/scripts/verify-pipeline-e2e.ts",
     "verify:questions:e2e": "tsx src/scripts/verify-card-questions-e2e.ts",
     "verify:manager:e2e": "tsx src/scripts/verify-manager-agent-e2e.ts",
-    "verify:designer:e2e": "tsx src/scripts/verify-designer-agent-e2e.ts"
+    "verify:designer:e2e": "tsx src/scripts/verify-designer-agent-e2e.ts",
+    "backfill:vault-summaries": "tsx src/scripts/backfill-vault-summaries.ts",
+    "measure:prompt-size": "tsx src/scripts/measure-prompt-size.ts"
   },
   "dependencies": {
     "@loopeng/agents": "workspace:*",
@@ -30,6 +33,7 @@
   "devDependencies": {
     "@types/node-cron": "^3.0.11",
     "tsx": "^4.19.1",
-    "typescript": "^5.6.3"
+    "typescript": "^5.6.3",
+    "vitest": "^3.2.6"
   }
 }

@@ -2,14 +2,19 @@ import type { cards } from "@loopeng/db";
 
 type Card = typeof cards.$inferSelect;
 
+// Prompts carry only this much per linked doc — slug + one-line frontmatter
+// summary, not the full body (RFC: rfc/2026-07-obsidian-vault-token-efficiency).
+// An agent that needs more fetches it on demand with the get_doc(slug) MCP tool.
 export interface SkillContext {
+  slug: string;
   title: string;
-  body: string;
+  summary: string;
 }
 
 export interface SpecDocContext {
+  slug: string;
   title: string;
-  body: string;
+  summary: string;
 }
 
 export interface AnsweredQuestionContext {
@@ -17,10 +22,21 @@ export interface AnsweredQuestionContext {
   answer: string;
 }
 
+// Documented once, inlined into every role prompt that lists doc summaries, so
+// an agent knows how to go from a one-liner to the full text when it needs it.
+const GET_DOC_CONVENTION = [
+  "Docs above are listed as a slug and a one-line summary only, to keep this prompt small — not",
+  "the full text. If a summary suggests a doc has detail relevant to your task, fetch its full",
+  'text with the `get_doc` MCP tool (call it with { "slug": "<slug>" }) before acting on it.',
+  "Don't guess at a doc's contents from its summary alone when the task depends on getting it right.",
+].join("\n");
+
+function formatDocSummaryLine(d: { slug: string; title: string; summary: string }): string {
+  return `- \`${d.slug}\` (${d.title}): ${d.summary}`;
+}
+
 function formatSpecDocsBlock(specDocs: SpecDocContext[]): string {
-  return specDocs.length
-    ? specDocs.map((d) => `### Spec: ${d.title}\n${d.body}`).join("\n\n")
-    : "(no linked spec docs found)";
+  return specDocs.length ? specDocs.map(formatDocSummaryLine).join("\n") : "(no linked spec docs found)";
 }
 
 // Parallel to the reviewer's existing VERDICT: convention — documented in
@@ -53,9 +69,7 @@ export function buildImplementerPrompt(
   specDocs: SpecDocContext[] = [],
   answeredQuestions: AnsweredQuestionContext[] = [],
 ): string {
-  const skillsBlock = skills.length
-    ? skills.map((s) => `### Skill: ${s.title}\n${s.body}`).join("\n\n")
-    : "(no relevant skill docs found)";
+  const skillsBlock = skills.length ? skills.map(formatDocSummaryLine).join("\n") : "(no relevant skill docs found)";
 
   return [
     "You are the implementer agent on an internal dev-team platform. You have been assigned the",
@@ -77,6 +91,8 @@ export function buildImplementerPrompt(
     "",
     "## Relevant skill docs",
     skillsBlock,
+    "",
+    GET_DOC_CONVENTION,
     ...formatAnsweredQuestionsBlock(answeredQuestions),
     ...(priorFailureNote
       ? ["", "## Previous attempt feedback", "A prior attempt at this card was rejected. Address this before continuing:", priorFailureNote]
@@ -126,7 +142,14 @@ const DECOMPOSITION_OUTPUT_FORMAT = [
   "```",
 ].join("\n");
 
-export function buildPlannerPrompt(requestText: string, existingCardTitles: string[] = []): string {
+export function buildPlannerPrompt(
+  requestText: string,
+  existingCardTitles: string[] = [],
+  specDocs: SpecDocContext[] = [],
+  skills: SkillContext[] = [],
+): string {
+  const skillsBlock = skills.length ? skills.map(formatDocSummaryLine).join("\n") : "(no relevant skill docs found)";
+
   return [
     "You are the planner (PM) agent on an internal dev-team platform. A product owner has sent",
     "a freeform request. Your job is to turn it into a spec doc and a decomposition into an epic",
@@ -139,6 +162,14 @@ export function buildPlannerPrompt(requestText: string, existingCardTitles: stri
     "",
     "## Existing open cards on this board (avoid duplicating work already tracked)",
     existingCardTitles.length ? existingCardTitles.map((t) => `- ${t}`).join("\n") : "(none)",
+    "",
+    "## Existing spec docs (RFCs/ADRs — check before proposing conflicting decisions)",
+    formatSpecDocsBlock(specDocs),
+    "",
+    "## Existing skill docs",
+    skillsBlock,
+    "",
+    GET_DOC_CONVENTION,
     "",
     DECOMPOSITION_OUTPUT_FORMAT,
     "",
@@ -242,6 +273,8 @@ export function buildReviewerPrompt(card: Card, diff: string, specDocs: SpecDocC
     "",
     "## Linked spec docs",
     formatSpecDocsBlock(specDocs),
+    "",
+    GET_DOC_CONVENTION,
     "",
     "## Diff to review",
     "```diff",

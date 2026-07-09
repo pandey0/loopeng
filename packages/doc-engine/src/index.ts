@@ -6,7 +6,7 @@ import { db } from "@loopeng/db";
 import { adrs, docVersions, docs, skills } from "@loopeng/db";
 import type { DocCreateInput, DocUpdateInput } from "@loopeng/shared";
 import { GitDocClient, repoRelativePath } from "./git-client.js";
-import { parseDoc, stringifyDoc, type DocFrontmatter } from "./frontmatter.js";
+import { assertValidSummary, parseDoc, stringifyDoc, type DocFrontmatter } from "./frontmatter.js";
 
 export { GitDocClient, repoRelativePath } from "./git-client.js";
 export * from "./frontmatter.js";
@@ -43,6 +43,7 @@ export async function createDoc(input: DocCreateInput) {
     id: input.slug,
     type: input.docType,
     title: input.title,
+    summary: input.summary,
     status: "draft",
     tags: input.tags,
     linked_cards: [],
@@ -60,6 +61,7 @@ export async function createDoc(input: DocCreateInput) {
       docType: input.docType,
       repoPath: relPath,
       latestCommitSha: sha,
+      summary: input.summary,
       status: "draft",
       tags: input.tags,
       createdBy: input.authorId ?? null,
@@ -94,14 +96,24 @@ export async function updateDoc(slug: string, input: DocUpdateInput) {
   const { frontmatter } = parseDoc(await gitClient!.readAtWorkingTree(existing.repoPath));
   const nextFrontmatter: DocFrontmatter = {
     ...frontmatter,
+    summary: input.summary ?? frontmatter.summary,
     status: input.status ?? frontmatter.status,
   };
+  // Enforced here (not just at the zod/API boundary) because updateDoc is also
+  // called directly by orchestrator/scripts — a doc written without ever going
+  // through the HTTP route must not be able to leave its summary empty either.
+  assertValidSummary(nextFrontmatter.summary);
   const fileContent = stringifyDoc(nextFrontmatter, input.content);
   const sha = await gitClient!.writeAndCommit(existing.repoPath, fileContent, input.message);
 
   const [updated] = await db
     .update(docs)
-    .set({ latestCommitSha: sha, status: nextFrontmatter.status, updatedAt: new Date() })
+    .set({
+      latestCommitSha: sha,
+      summary: nextFrontmatter.summary,
+      status: nextFrontmatter.status,
+      updatedAt: new Date(),
+    })
     .where(eq(docs.id, existing.id))
     .returning();
 

@@ -30,6 +30,10 @@ export const docs = pgTable("docs", {
   docType: text("doc_type").notNull(), // wiki | adr | rfc | skill
   repoPath: text("repo_path").notNull(),
   latestCommitSha: text("latest_commit_sha"),
+  // One-line frontmatter summary, mirrored from the git file so callers building
+  // agent prompts can list every linked doc's summary without a git read per doc
+  // (see doc-engine's createDoc/updateDoc, which is the only writer of this column).
+  summary: text("summary").notNull().default(""),
   status: text("status").notNull().default("draft"), // draft|proposed|accepted|superseded|deprecated
   tags: text("tags").array().notNull().default(sql`'{}'::text[]`),
   createdBy: uuid("created_by").references(() => users.id),

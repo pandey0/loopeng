@@ -137,6 +137,16 @@ function slugifyTitle(title: string): string {
     .slice(0, 50);
 }
 
+// The planner's structured output has no dedicated doc-summary field, so the
+// spec doc's mandatory one-line summary is derived from the epic description
+// (the same text the doc's title/content already come from) rather than
+// asking the planner to hand-author a second, redundant one-liner.
+function deriveDocSummary(epicDescription: string): string {
+  const collapsed = epicDescription.replace(/\s+/g, " ").trim();
+  const MAX_SUMMARY_LENGTH = 200;
+  return collapsed.length > MAX_SUMMARY_LENGTH ? `${collapsed.slice(0, MAX_SUMMARY_LENGTH - 1)}…` : collapsed;
+}
+
 export interface PersistDecompositionOptions {
   authorId?: string;
 }
@@ -214,6 +224,7 @@ export async function persistDecomposition(
     title: `Spec: ${decomposition.epic.title}`,
     docType: "wiki",
     content: specBody,
+    summary: deriveDocSummary(decomposition.epic.description),
     tags: ["intake", "planner"],
     authorId: opts.authorId,
     message: `planner intake: ${decomposition.epic.title}`,
