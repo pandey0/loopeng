@@ -51,19 +51,20 @@ describe("real vault backfill + prompt-size measurement (rfc/2026-07-obsidian-va
     }
   }, 60_000);
 
-  it("records a real event_log row on this card with the measured prompt-size reduction, then cleans up its own row", async () => {
+  it("records a real event_log row on this card with the measured prompt-size reduction, and leaves it in place", async () => {
     const { id, result } = await recordMeasurement();
-    try {
-      expect(result.specDocsSection.reductionPct).toBeGreaterThan(50);
-      expect(result.retryFailureNote.newLines).toBeLessThanOrEqual(10);
+    expect(result.specDocsSection.reductionPct).toBeGreaterThan(50);
+    expect(result.retryFailureNote.newLines).toBeLessThanOrEqual(10);
 
-      const [row] = await db.select().from(eventLog).where(eq(eventLog.id, id));
-      expect(row).toBeTruthy();
-      expect(row!.entityType).toBe("card");
-      expect(row!.entityId).toBe(CARD_ID);
-      expect(row!.eventType).toBe("card.doc_retrieval_benchmark");
-    } finally {
-      await db.delete(eventLog).where(eq(eventLog.id, id));
-    }
+    // Deliberately no cleanup: this row is the durable proof, on the card
+    // itself, that the measurement was recorded — not just computed in a
+    // test's memory. recordMeasurement() replaces any prior benchmark row
+    // for this card, so re-running this test (or the CLI script) keeps
+    // exactly one current row rather than leaking one per run.
+    const [row] = await db.select().from(eventLog).where(eq(eventLog.id, id));
+    expect(row).toBeTruthy();
+    expect(row!.entityType).toBe("card");
+    expect(row!.entityId).toBe(CARD_ID);
+    expect(row!.eventType).toBe("card.doc_retrieval_benchmark");
   }, 30_000);
 });

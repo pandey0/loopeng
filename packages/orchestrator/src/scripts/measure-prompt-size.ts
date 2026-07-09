@@ -1,5 +1,5 @@
 import { pathToFileURL } from "node:url";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { cards, db, eventLog, pool } from "@loopeng/db";
 import { buildImplementerPrompt, distillFailureNote, type SpecDocContext } from "@loopeng/agents";
 import { getDoc } from "@loopeng/doc-engine";
@@ -99,22 +99,28 @@ export async function computeMeasurement(): Promise<PromptSizeMeasurement> {
   };
 }
 
-// Runs the measurement for real and inserts the event_log row the "measured
-// prompt size ... recorded in the card" acceptance criterion requires.
-// Exported (not folded into main()) so vault-and-metrics.real.test.ts can
-// drive this exact code path and assert the row actually landed, then clean
-// up the row it created — the same real-DB-insert, then read-it-back-and-
-// delete-it pattern index.test.ts uses for docs it creates.
+const EVENT_TYPE = "card.doc_retrieval_benchmark";
+
+// Runs the measurement for real and records the event_log row the "measured
+// prompt size ... recorded in the card" acceptance criterion requires. Any
+// prior benchmark row for this card is replaced (not appended) so the card
+// always carries exactly one, current measurement rather than growing an
+// unbounded history — this is what lets vault-and-metrics.real.test.ts drive
+// this exact code path on every CI run and leave the resulting row in place
+// (no cleanup), the same durable-artifact pattern the vault-backfill test
+// uses, instead of inserting-then-deleting it and proving nothing persists.
 export async function recordMeasurement(): Promise<{ id: number; result: PromptSizeMeasurement }> {
   const result = await computeMeasurement();
   console.log(JSON.stringify(result, null, 2));
+
+  await db.delete(eventLog).where(and(eq(eventLog.entityId, CARD_ID), eq(eventLog.eventType, EVENT_TYPE)));
 
   const [row] = await db
     .insert(eventLog)
     .values({
       entityType: "card",
       entityId: CARD_ID,
-      eventType: "card.doc_retrieval_benchmark",
+      eventType: EVENT_TYPE,
       actorType: "agent",
       payload: result,
     })
