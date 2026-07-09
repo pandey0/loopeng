@@ -65,6 +65,13 @@ export const dockerComposeProvider: DeployProvider = {
     try {
       await git.merge(["--no-ff", ctx.worktree.branchName, "-m", `merge: ${ctx.card.title} (card ${ctx.card.id.slice(0, 8)})`]);
     } catch (err) {
+      // A conflicted merge leaves MERGE_HEAD set and conflict markers written
+      // into files on the *shared* base checkout — every other card's deploy
+      // shares this same repoRoot, so an un-aborted merge here poisons the
+      // isClean() check above for all of them until a human manually runs
+      // `git merge --abort`. Always abort back to preMergeSha so a failed
+      // merge here is self-contained to this one deploy attempt.
+      await git.merge(["--abort"]).catch(() => {});
       return { status: "failed", createdNewCommit: false, detail: { step: "merge", error: (err as Error).message } };
     }
     const mergedSha = (await git.revparse(["HEAD"])).trim();
@@ -101,6 +108,9 @@ export const dockerComposeProvider: DeployProvider = {
     try {
       await git.raw(["revert", "--no-edit", "-m", "1", "HEAD"]);
     } catch (err) {
+      // Same failure mode as the merge above: a conflicted revert leaves
+      // REVERT_HEAD set and markers on disk in the shared base checkout.
+      await git.raw(["revert", "--abort"]).catch(() => {});
       return { status: "failed", createdNewCommit: false, detail: { step: "revert", error: (err as Error).message, toCommitSha } };
     }
 
