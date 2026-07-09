@@ -1,4 +1,4 @@
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { cardDocLinks, cards, db, docs, pool } from "@loopeng/db";
 import { getGate } from "@loopeng/gates";
 import { afterAll, describe, expect, it } from "vitest";
@@ -28,11 +28,15 @@ describe("real ADR link for card/multi-project-onboarding", () => {
     expect(doc!.status).toBe("accepted");
     expect(doc!.docType).toBe("adr");
 
+    // Filtered by linkType, not just cardId: this card also carries a
+    // "spec" link (see spec-linked.real.test.ts) now that the card's spec
+    // doc has been added, so cardId alone no longer uniquely identifies a
+    // row (card_doc_links' PK is cardId+docId+linkType).
     const [link] = await db
       .select()
       .from(cardDocLinks)
-      .where(eq(cardDocLinks.cardId, CARD_ID));
-    expect(link, `expected a card_doc_links row for card ${CARD_ID}`).toBeTruthy();
+      .where(and(eq(cardDocLinks.cardId, CARD_ID), eq(cardDocLinks.linkType, "adr")));
+    expect(link, `expected an adr-linked card_doc_links row for card ${CARD_ID}`).toBeTruthy();
     expect(link!.docId).toBe(docId);
     expect(link!.linkType).toBe("adr");
   }, 30_000);
