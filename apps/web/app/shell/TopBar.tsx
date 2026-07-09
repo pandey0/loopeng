@@ -8,11 +8,13 @@ import { useBoard } from "../providers/BoardProvider";
 import { describeEvent } from "../../lib/events";
 import { BoardSwitcher } from "./BoardSwitcher";
 import { IntakeModal } from "./IntakeModal";
+import { NewProjectModal } from "./NewProjectModal";
 
 export function TopBar() {
   const { events, unreadCount, markAllRead } = useNotifications();
   const { boardId } = useBoard();
   const [intakeOpen, setIntakeOpen] = useState(false);
+  const [newProjectOpen, setNewProjectOpen] = useState(false);
 
   const items: NotificationItem[] = events.map((event) => ({
     id: event.id,
@@ -27,6 +29,9 @@ export function TopBar() {
     <header className="flex h-14 shrink-0 items-center justify-between border-b bg-card px-4">
       <BoardSwitcher />
       <div className="flex items-center gap-2">
+        <Button size="sm" variant="outline" onClick={() => setNewProjectOpen(true)}>
+          New project
+        </Button>
         <Button size="sm" disabled={!boardId} onClick={() => setIntakeOpen(true)}>
           New
         </Button>
@@ -46,6 +51,7 @@ export function TopBar() {
         />
       </div>
       {boardId && <IntakeModal boardId={boardId} open={intakeOpen} onClose={() => setIntakeOpen(false)} />}
+      <NewProjectModal open={newProjectOpen} onClose={() => setNewProjectOpen(false)} />
     </header>
   );
 }

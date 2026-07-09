@@ -63,6 +63,9 @@ importers:
       '@types/ws':
         specifier: ^8.5.13
         version: 8.18.1
+      simple-git:
+        specifier: ^3.27.0
+        version: 3.36.0
       typescript:
         specifier: ^5.6.3
         version: 5.9.3
@@ -445,6 +448,9 @@ importers:
       typescript:
         specifier: ^5.6.3
         version: 5.9.3
+      vitest:
+        specifier: ^3.2.6
+        version: 3.2.6(@types/debug@4.1.13)(@types/node@22.20.0)
 
 packages:
 

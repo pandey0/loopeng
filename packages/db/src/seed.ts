@@ -75,6 +75,7 @@ async function main() {
     { key: "peer_review", name: "Sub-agent peer review passed", blocking: true },
     { key: "design_review", name: "Designer review passed", blocking: true },
     { key: "deploy_live", name: "Deployed with monitoring wired", blocking: true },
+    { key: "repo_valid", name: "Target project repo resolves to a valid git repository", blocking: true },
   ]);
 
   await db.insert(automations).values([

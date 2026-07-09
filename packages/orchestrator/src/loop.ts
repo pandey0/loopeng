@@ -2,7 +2,7 @@ import { eq } from "drizzle-orm";
 import { db } from "@loopeng/db";
 import { cardQuestions, cards, eventLog, gateDefinitions, gateResults } from "@loopeng/db";
 import { applyTransition } from "@loopeng/board-engine";
-import { createWorktree, getActiveWorktree } from "@loopeng/worktree-manager";
+import { createWorktree, getActiveWorktree, InvalidRepoError } from "@loopeng/worktree-manager";
 import {
   distillFailureNote,
   hasDesignerSpecDoc,
@@ -41,6 +41,15 @@ async function recordPeerReviewGate(cardId: string, passed: boolean, agentRunId:
   });
 }
 
+async function recordRepoValidGate(cardId: string, passed: boolean, detail: Record<string, unknown>) {
+  const [gateDef] = await db.select().from(gateDefinitions).where(eq(gateDefinitions.key, "repo_valid"));
+  if (!gateDef) {
+    console.warn("[orchestrator] repo_valid gate_definition not seeded, skipping gate_results row");
+    return;
+  }
+  await db.insert(gateResults).values({ cardId, gateDefinitionId: gateDef.id, status: passed ? "passed" : "failed", detail });
+}
+
 async function recordDesignReviewGate(cardId: string, passed: boolean, agentRunId: string, detail: Record<string, unknown>) {
   const [gateDef] = await db.select().from(gateDefinitions).where(eq(gateDefinitions.key, "design_review"));
   if (!gateDef) {
@@ -75,7 +84,23 @@ export async function orchestrateCard(cardId: string, hooks: HookRegistry): Prom
 
   let worktree = await getActiveWorktree(cardId);
   if (!worktree) {
-    worktree = await createWorktree(cardId);
+    // createWorktree can throw before anything is transitioned off "ready"
+    // (e.g. the card's project repo has no .git, or it did at registration
+    // time but was since deleted/moved). Left uncaught, that exception
+    // propagates out of orchestrateCard into the event-trigger's bare
+    // `.catch(console.error)` — the card never leaves "ready", so it looks
+    // to a human like nothing is happening rather than like a failure. Catch
+    // it here, record a real reason, and land the card in "blocked" instead.
+    try {
+      worktree = await createWorktree(cardId);
+    } catch (err) {
+      const reason = err instanceof InvalidRepoError ? err.message : `worktree setup failed: ${(err as Error).message}`;
+      await applyTransition({ cardId, toState: "in_progress", actorType: "agent" });
+      await recordRepoValidGate(cardId, false, { reason });
+      await applyTransition({ cardId, toState: "blocked", actorType: "agent" });
+      await hooks.fire("onFailure", { cardId, reason: "worktree_setup_failed", detail: reason });
+      return { status: "blocked", reason };
+    }
     await hooks.fire("afterWorktreeCreated", { cardId, worktreeId: worktree.id });
   }
 

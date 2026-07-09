@@ -74,11 +74,28 @@ export const skills = pgTable("skills", {
   sourceCardId: uuid("source_card_id").references((): AnyPgColumn => cards.id),
 });
 
+// ===== Projects (multi-project onboarding) =====
+// One row per onboarded target repo. A board is optionally scoped to a
+// project via boards.project_id -- nullable so the single dogfood board that
+// predates this feature keeps working unmigrated (its cards resolve their
+// target repo via the TARGET_REPO_PATH env fallback, same as before this
+// table existed). See ADR "multi-project-onboarding".
+export const projects = pgTable("projects", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  name: text("name").notNull(),
+  // Absolute local filesystem path to the target repo's root (must contain
+  // .git -- validated at registration time and re-validated on every
+  // dispatch, since the directory can be deleted/moved after registration).
+  repoPath: text("repo_path").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
 // ===== Board engine =====
 export const boards = pgTable("boards", {
   id: uuid("id").primaryKey().defaultRandom(),
   name: text("name").notNull(),
   description: text("description"),
+  projectId: uuid("project_id").references(() => projects.id),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
