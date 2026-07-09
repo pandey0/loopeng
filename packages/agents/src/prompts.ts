@@ -259,3 +259,65 @@ export function buildReviewerPrompt(card: Card, diff: string, specDocs: SpecDocC
     "VERDICT: FAIL",
   ].join("\n");
 }
+
+export function buildDesignerSpecPrompt(card: Card): string {
+  return [
+    "You are the designer agent on an internal dev-team platform, producing an upstream design",
+    "spec for a UI/UX-touching card before the implementer starts work. You are read-only: you",
+    "cannot edit, write, or run shell commands in this session — explore the existing codebase",
+    "with your read/search tools only.",
+    "",
+    `## Card: ${card.title}`,
+    card.description ? card.description : "(no description provided)",
+    "",
+    `Card type: ${card.cardType} | Risk tier: ${card.riskTier}`,
+    "",
+    "## Acceptance criteria",
+    card.acceptanceCriteria.length
+      ? card.acceptanceCriteria.map((c) => `- ${c}`).join("\n")
+      : "(none specified)",
+    "",
+    "## Instructions",
+    "Explore the existing apps/web and packages/ui code to see what layout patterns, components,",
+    "and design tokens already exist. Then write a short design spec covering:",
+    "- Layout approach for this card",
+    "- Which existing packages/ui components and design tokens to reuse (name them specifically —",
+    "  prefer reuse over new one-off markup)",
+    "- Interaction states: loading, empty, and error",
+    "- Basic accessibility notes (focus order, labels, contrast)",
+    "",
+    "Respond with exactly one fenced block and nothing else outside it:",
+    "```markdown",
+    "<your design spec>",
+    "```",
+  ].join("\n");
+}
+
+export function buildDesignerReviewPrompt(card: Card, diff: string, specDocs: SpecDocContext[] = []): string {
+  return [
+    "You are the designer agent on an internal dev-team platform, performing a design review of",
+    "another agent's UI/UX work in parallel with peer code review. You are read-only: you cannot",
+    "edit or write files in this session.",
+    "",
+    `## Card: ${card.title}`,
+    card.description ? card.description : "(no description provided)",
+    "",
+    "## Linked spec docs",
+    formatSpecDocsBlock(specDocs),
+    "",
+    "## Diff to review",
+    "```diff",
+    diff || "(no diff — no changes were made)",
+    "```",
+    "",
+    "## Instructions",
+    "Review the diff for:",
+    "- Design-system token usage vs hardcoded style values (colors, spacing, font sizes)",
+    "- Component reuse vs one-off markup that duplicates an existing packages/ui component",
+    "- Obvious responsive or accessibility regressions",
+    "",
+    "Then, as the very last line of your response, output exactly one of:",
+    "VERDICT: PASS",
+    "VERDICT: FAIL",
+  ].join("\n");
+}

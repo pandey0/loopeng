@@ -3,8 +3,15 @@ import { db } from "@loopeng/db";
 import { cardQuestions, cards, eventLog, gateDefinitions, gateResults } from "@loopeng/db";
 import { applyTransition } from "@loopeng/board-engine";
 import { createWorktree, getActiveWorktree } from "@loopeng/worktree-manager";
-import { resolveQuestionRouting, runImplementerAgent, runReviewerAgent } from "@loopeng/agents";
-import { runGatePipeline } from "@loopeng/gates";
+import {
+  hasDesignerSpecDoc,
+  resolveQuestionRouting,
+  runDesignerReviewAgent,
+  runDesignerSpecAgent,
+  runImplementerAgent,
+  runReviewerAgent,
+} from "@loopeng/agents";
+import { cardTouchesUi, runGatePipeline } from "@loopeng/gates";
 import type { HookRegistry } from "./hooks.js";
 
 const MAX_ATTEMPTS = 3;
@@ -22,6 +29,21 @@ async function recordPeerReviewGate(cardId: string, passed: boolean, agentRunId:
   const [gateDef] = await db.select().from(gateDefinitions).where(eq(gateDefinitions.key, "peer_review"));
   if (!gateDef) {
     console.warn("[orchestrator] peer_review gate_definition not seeded, skipping gate_results row");
+    return;
+  }
+  await db.insert(gateResults).values({
+    cardId,
+    gateDefinitionId: gateDef.id,
+    status: passed ? "passed" : "failed",
+    runByAgentRunId: agentRunId,
+    detail,
+  });
+}
+
+async function recordDesignReviewGate(cardId: string, passed: boolean, agentRunId: string, detail: Record<string, unknown>) {
+  const [gateDef] = await db.select().from(gateDefinitions).where(eq(gateDefinitions.key, "design_review"));
+  if (!gateDef) {
+    console.warn("[orchestrator] design_review gate_definition not seeded, skipping gate_results row");
     return;
   }
   await db.insert(gateResults).values({
@@ -57,6 +79,18 @@ export async function orchestrateCard(cardId: string, hooks: HookRegistry): Prom
   }
 
   await applyTransition({ cardId, toState: "in_progress", actorType: "agent" });
+
+  // Designer role (RFC 2026-07 agent org chart): a UI/UX-touching card gets a
+  // design spec upstream of the implementer's first run, and a design review
+  // downstream alongside peer review. isUiCard is computed once here (not
+  // re-checked per attempt) since card.tags/description don't change across
+  // retries. hasDesignerSpecDoc guards against re-running the spec agent —
+  // and hitting docs.slug's unique constraint — if this card re-enters
+  // in_progress later (e.g. after a QUESTION: pause).
+  const isUiCard = await cardTouchesUi(card);
+  if (isUiCard && !(await hasDesignerSpecDoc(cardId))) {
+    await runDesignerSpecAgent(card);
+  }
 
   let priorFailureNote: string | undefined;
 
@@ -117,6 +151,18 @@ export async function orchestrateCard(cardId: string, hooks: HookRegistry): Prom
       resultText: reviewResult.resultText.slice(0, 4000),
       attempt,
     });
+
+    // Design review runs alongside peer review, same diff. v1 is advisory
+    // only — its verdict is recorded as the design_review gate_results row
+    // but (unlike peer review) does not itself retry or block the card;
+    // out of scope for v1 per the designer-agent-role spec.
+    if (isUiCard) {
+      const designReviewResult = await runDesignerReviewAgent(currentCard);
+      await recordDesignReviewGate(cardId, designReviewResult.verdict === "pass", designReviewResult.agentRunId, {
+        resultText: designReviewResult.resultText.slice(0, 4000),
+        attempt,
+      });
+    }
 
     if (reviewResult.verdict === "fail") {
       if (attempt < MAX_ATTEMPTS) {

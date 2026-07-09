@@ -52,6 +52,12 @@ async function main() {
       description: "Reviews a freshly-decomposed epic's child cards and may adjust the breakdown; escalation target for QUESTION:s from its cards",
       capabilities: ["management"],
     },
+    {
+      name: "designer",
+      description:
+        "Engages UI/UX-touching cards at two points: an upstream design spec before the implementer starts, and a downstream design review parallel to code review",
+      capabilities: ["design"],
+    },
   ]);
 
   await db.insert(gateDefinitions).values([
@@ -61,6 +67,7 @@ async function main() {
     { key: "docs_adr_linked", name: "Spec doc linked", blocking: true },
     { key: "adr_required", name: "ADR linked if architecture touched", blocking: true },
     { key: "peer_review", name: "Sub-agent peer review passed", blocking: true },
+    { key: "design_review", name: "Designer review passed", blocking: true },
     { key: "deploy_live", name: "Deployed with monitoring wired", blocking: true },
   ]);
 
