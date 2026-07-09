@@ -58,6 +58,12 @@ export async function createWorktree(cardId: string, opts: CreateWorktreeOptions
     await git.raw(["worktree", "add", fsPath, "-b", branchName, baseBranch]);
   } catch (err) {
     await db.update(worktrees).set({ status: "failed" }).where(eq(worktrees.id, worktreeRow.id));
+    // branchName is deterministic (card id + title, no attempt/timestamp
+    // component) -- if `worktree add` got far enough to create the branch
+    // before failing on a later step (fsPath collision, fs error, prune
+    // racing a crash), every retry hits "branch already exists" and fails
+    // identically forever. Best-effort cleanup so a retry gets a clean slate.
+    await git.raw(["branch", "-D", branchName]).catch(() => {});
     throw err;
   }
 
