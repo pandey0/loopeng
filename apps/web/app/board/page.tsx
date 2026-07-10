@@ -4,14 +4,14 @@ import { Suspense, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Column, Button, Dialog, isHumanBlocked } from "@loopeng/ui";
+import { Column, Button, isHumanBlocked } from "@loopeng/ui";
 import type { CardState, CardWithStatus } from "@loopeng/shared";
 import { api } from "../../lib/api";
 import { useBoard } from "../providers/BoardProvider";
 import { ActivityFeed } from "./ActivityFeed";
 import { ApprovalDialog } from "./ApprovalDialog";
-import { AgentSessionPanel } from "../card/[cardId]/AgentSessionPanel";
 import { StagePipelineBar } from "./StagePipelineBar";
+import { AgentSessionDrawer } from "./AgentSessionDrawer";
 
 const HIGHLIGHT_DURATION_MS = 4000;
 // While anything is actively running, poll listCards so the board tile's
@@ -132,11 +132,12 @@ function BoardPageInner() {
   }
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
-      <StagePipelineBar cards={cards} />
-      <div className="flex min-h-0 flex-1 gap-3 p-4">
-        <div className="flex flex-1 gap-3 overflow-x-auto">
-          {PHASE_3_COLUMNS.map(({ state, title }) => (
+    <div className="flex min-h-0 flex-1">
+      <div className="flex min-h-0 flex-1 flex-col">
+        <StagePipelineBar cards={cards} />
+        <div className="flex min-h-0 flex-1 gap-3 p-4">
+          <div className="flex flex-1 gap-3 overflow-x-auto">
+            {PHASE_3_COLUMNS.map(({ state, title }) => (
             <Column
               key={state}
               state={state}
@@ -206,30 +207,17 @@ function BoardPageInner() {
                       : undefined
               }
             />
-          ))}
+            ))}
+          </div>
+          <ActivityFeed boardId={boardId} />
         </div>
-        <ActivityFeed boardId={boardId} />
       </div>
+      <AgentSessionDrawer card={watchCard} onClose={() => setWatchCard(null)} />
       <ApprovalDialog
         cardId={approvalCardId}
         onClose={() => setApprovalCardId(null)}
         onApprove={(cardId) => handleApprove(cardId)}
       />
-      {watchCard?.activeAgentRun && (
-        <Dialog
-          open
-          onClose={() => setWatchCard(null)}
-          title={`Watching — ${watchCard.title}`}
-          description="Live session: new events stream in and you can send messages."
-          className="max-w-2xl"
-        >
-          <AgentSessionPanel
-            agentRunId={watchCard.activeAgentRun.agentRunId}
-            roleName={watchCard.activeAgentRun.roleName}
-            live={watchCard.activeAgentRun.live}
-          />
-        </Dialog>
-      )}
     </div>
   );
 }

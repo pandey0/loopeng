@@ -27,6 +27,8 @@ export interface AgentSessionPanelProps {
   roleName: string | null;
   /** Whether the run had an attachable live session when the panel opened. */
   live: boolean;
+  /** Root height class -- defaults to a fixed viewport fraction (fits a Dialog), pass "h-full" when the parent already constrains height (e.g. a drawer). */
+  heightClassName?: string;
 }
 
 // Chat-style view of an agent run's transcript over the card-C WebSocket.
@@ -34,7 +36,7 @@ export interface AgentSessionPanelProps {
 // and then streams new events (with an input box to steer the agent); a
 // completed run streams the persisted transcript once and closes, leaving a
 // read-only playback with no input box.
-export function AgentSessionPanel({ agentRunId, roleName, live }: AgentSessionPanelProps) {
+export function AgentSessionPanel({ agentRunId, roleName, live, heightClassName = "h-[60vh]" }: AgentSessionPanelProps) {
   const [items, setItems] = useState<ChatItem[]>([]);
   const [connectionState, setConnectionState] = useState<"connecting" | "open" | "closed" | "error">("connecting");
   const [draft, setDraft] = useState("");
@@ -84,7 +86,7 @@ export function AgentSessionPanel({ agentRunId, roleName, live }: AgentSessionPa
   const canSend = live && connectionState === "open";
 
   return (
-    <div className="flex h-[60vh] flex-col">
+    <div className={cn("flex flex-col", heightClassName)}>
       <div className="mb-2 flex items-center gap-2 text-xs text-muted-foreground">
         <Badge variant="outline">{roleName ?? "agent"}</Badge>
         {canSend ? (
