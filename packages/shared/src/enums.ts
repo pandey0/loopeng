@@ -6,6 +6,7 @@ export const CARD_STATES = [
   "gate_checks",
   "awaiting_approval",
   "deploying",
+  "deploy_failed",
   "done",
   "blocked",
   "cancelled",

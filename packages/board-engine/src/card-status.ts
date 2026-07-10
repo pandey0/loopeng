@@ -254,7 +254,12 @@ export async function attachCardStatus<T extends { id: string; state: string }>(
   cardRows: T[],
   options?: { isRunLive?: IsRunLive; getSnippet?: GetRunSnippet },
 ): Promise<(T & Pick<CardWithStatus, "blockedReason" | "activeAgentRun">)[]> {
-  const blockedCardIds = cardRows.filter((c) => c.state === "blocked").map((c) => c.id);
+  // deploy_failed shares the same "why is this stalled" lookup as blocked --
+  // its most common cause is the deploy_live gate failing, already covered
+  // by the failingGates query below.
+  const blockedCardIds = cardRows
+    .filter((c) => c.state === "blocked" || c.state === "deploy_failed")
+    .map((c) => c.id);
   const activeCandidateIds = cardRows
     .filter((c) => c.state === "in_progress" || c.state === "in_review")
     .map((c) => c.id);

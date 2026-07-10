@@ -31,6 +31,7 @@ const PHASE_3_COLUMNS: { state: CardState; title: string }[] = [
   { state: "gate_checks", title: "Gate Checks" },
   { state: "awaiting_approval", title: "Awaiting Approval" },
   { state: "deploying", title: "Deploying" },
+  { state: "deploy_failed", title: "Deploy Failed" },
   { state: "blocked", title: "Blocked" },
   { state: "done", title: "Done" },
 ];
@@ -115,6 +116,20 @@ function BoardPageInner() {
     }
   }
 
+  // Deploy mechanics (infra pre-check, transient docker error, flaky health
+  // check) failed after implementer/reviewer/gates already passed -- retry
+  // just the deploy step directly rather than sending the card through the
+  // full blocked -> ready recovery cycle, which would re-run everything and
+  // force the product owner to re-approve code that never changed.
+  async function handleRetryDeploy(cardId: string) {
+    try {
+      await api.transitionCard(cardId, "deploying");
+      queryClient.invalidateQueries({ queryKey: ["cards", boardId] });
+    } catch (err) {
+      alert((err as Error).message);
+    }
+  }
+
   return (
     <div>
       {boardId && (
@@ -165,7 +180,27 @@ function BoardPageInner() {
                           Retry
                         </Button>
                       )
-                    : undefined
+                    : state === "deploy_failed"
+                      ? (card) => (
+                          <div className="-mt-1 mb-2 flex gap-1.5">
+                            <Button
+                              size="sm"
+                              onClick={() => handleRetryDeploy(card.id)}
+                              className="h-auto px-2 py-1 text-[11px]"
+                            >
+                              Retry deploy
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => handleDrop(card.id, "blocked")}
+                              className="h-auto px-2 py-1 text-[11px]"
+                            >
+                              Needs code fix
+                            </Button>
+                          </div>
+                        )
+                      : undefined
               }
             />
           ))}

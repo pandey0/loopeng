@@ -26,14 +26,16 @@ async function recordDeployLiveGate(cardId: string, passed: boolean, detail: Rec
 }
 
 export interface DeployPipelineResult {
-  status: "done" | "blocked";
+  status: "done" | "deploy_failed";
 }
 
 // Runs once a card reaches "deploying" (auto for low/med risk, or after
 // human approval for high risk). Merges the worktree branch into base,
 // deploys, and health-checks. Live -> done + worktree torn down (merged).
-// Unhealthy -> automatic rollback to the pre-merge commit, card -> blocked
-// for a human, worktree kept for inspection.
+// Unhealthy -> automatic rollback to the pre-merge commit, card ->
+// deploy_failed for a human (or automation) to retry the deploy step
+// directly without re-running implementer/reviewer/gates, worktree kept
+// for inspection.
 export async function runDeployPipeline(cardId: string, provider: DeployProvider = dockerComposeProvider): Promise<DeployPipelineResult> {
   const [card] = await db.select().from(cards).where(eq(cards.id, cardId));
   if (!card) throw new Error(`card not found: ${cardId}`);
@@ -126,8 +128,8 @@ export async function runDeployPipeline(cardId: string, provider: DeployProvider
   }
 
   await recordDeployLiveGate(cardId, false, { deployFailure: result.detail, rollback: rollbackDetail });
-  await applyTransition({ cardId, toState: "blocked", actorType: "automation" });
-  return { status: "blocked" };
+  await applyTransition({ cardId, toState: "deploy_failed", actorType: "automation" });
+  return { status: "deploy_failed" };
 }
 
 export * from "./types.js";
