@@ -660,7 +660,7 @@ export async function startProjectAnalyzerAgent(project: {
 
   const [run] = await db
     .insert(agentRuns)
-    .values({ agentRoleId: roleId, status: "running", startedAt: new Date() })
+    .values({ agentRoleId: roleId, projectId: project.id, status: "running", startedAt: new Date() })
     .returning();
   if (!run) throw new Error("failed to insert agent_runs row");
 

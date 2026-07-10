@@ -2,8 +2,11 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useQuery } from "@tanstack/react-query";
 import { cn } from "@loopeng/ui";
-import { useNotifications } from "../providers/NotificationProvider";
+import { api } from "../../lib/api";
+import { buildInboxItems } from "../../lib/inbox";
+import { useBoard } from "../providers/BoardProvider";
 
 const NAV_ITEMS = [
   { href: "/board", label: "Board", icon: "🗂️" },
@@ -53,7 +56,17 @@ function NavRow({
 
 export function Sidebar() {
   const pathname = usePathname();
-  const { unreadCount } = useNotifications();
+  const { boardId } = useBoard();
+  // Same query key /inbox and /board already use for this board's cards --
+  // shares that cache instead of adding a second fetch, and (unlike the
+  // activity-events-since-mount count this replaced) actually matches what
+  // clicking through to /inbox shows.
+  const cardsQuery = useQuery({
+    queryKey: ["cards", boardId],
+    queryFn: () => api.listCards(boardId!),
+    enabled: !!boardId,
+  });
+  const inboxCount = buildInboxItems(cardsQuery.data ?? []).length;
 
   return (
     <aside className="flex h-full w-[200px] shrink-0 flex-col bg-background px-3 py-4">
@@ -79,7 +92,7 @@ export function Sidebar() {
           icon="📥"
           label="Inbox"
           active={pathname === "/inbox"}
-          badge={unreadCount}
+          badge={inboxCount}
         />
       </nav>
 

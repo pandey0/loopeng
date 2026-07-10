@@ -3,18 +3,10 @@
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
-import { cn, isHumanBlocked } from "@loopeng/ui";
-import type { CardWithStatus } from "@loopeng/shared";
+import { cn } from "@loopeng/ui";
 import { api } from "../../lib/api";
+import { buildInboxItems, type InboxKind } from "../../lib/inbox";
 import { useBoard } from "../providers/BoardProvider";
-
-type InboxKind = "approval" | "question" | "blocked";
-
-interface InboxItem {
-  card: CardWithStatus;
-  kind: InboxKind;
-  detail: string;
-}
 
 type Filter = "all" | InboxKind;
 
@@ -41,24 +33,6 @@ const KIND_META: Record<InboxKind, { icon: string; tint: string; badgeLabel: str
 const HUMAN_BLOCKED_PREFIX = "waiting on answer:";
 function stripQuestionPrefix(reason: string): string {
   return reason.startsWith(HUMAN_BLOCKED_PREFIX) ? reason.slice(HUMAN_BLOCKED_PREFIX.length).trim() : reason;
-}
-
-function buildInboxItems(cards: CardWithStatus[]): InboxItem[] {
-  const items: InboxItem[] = [];
-  for (const card of cards) {
-    if (card.state === "awaiting_approval") {
-      items.push({
-        card,
-        kind: "approval",
-        detail: card.blockedReason ? card.blockedReason : "Ready for review",
-      });
-    } else if (card.blockedReason && isHumanBlocked(card.blockedReason)) {
-      items.push({ card, kind: "question", detail: stripQuestionPrefix(card.blockedReason) });
-    } else if (card.state === "blocked") {
-      items.push({ card, kind: "blocked", detail: card.blockedReason ?? "Blocked" });
-    }
-  }
-  return items;
 }
 
 export default function InboxPage() {
@@ -137,7 +111,9 @@ export default function InboxPage() {
                       </span>
                       <span className="truncate text-[13.5px] font-semibold">{card.title}</span>
                     </div>
-                    <p className="mt-1.5 text-[13px] leading-[1.5] text-foreground/80">{detail}</p>
+                    <p className="mt-1.5 text-[13px] leading-[1.5] text-foreground/80">
+                      {kind === "question" ? stripQuestionPrefix(detail) : detail}
+                    </p>
                     <p className="mt-1.5 font-mono text-[10.5px] text-muted-foreground">
                       {new Date(card.updatedAt).toLocaleString()}
                     </p>

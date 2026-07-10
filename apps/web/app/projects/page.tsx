@@ -3,10 +3,11 @@
 import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { Project } from "@loopeng/shared";
-import { Button } from "@loopeng/ui";
+import { Button, Dialog } from "@loopeng/ui";
 import { api } from "../../lib/api";
+import { AgentSessionPanel } from "../card/[cardId]/AgentSessionPanel";
 import { useBoard } from "../providers/BoardProvider";
 import { NewProjectModal } from "../shell/NewProjectModal";
 
@@ -28,35 +29,55 @@ function formatCreatedAt(value: Date): string {
 // briefStatus is real though (POST /projects kicks off the analyzer agent
 // in the background) -- polled below so "Building brain…" flips to "Brain
 // ready" without a manual refresh.
-function BriefBadge({ project }: { project: Project }) {
-  if (project.briefStatus === "ready") {
+//
+// This is a snapshot, not something that stays in sync with the repo --
+// nothing re-runs it as cards land, so the reanalyze button is the only
+// way to refresh it, not a cosmetic extra.
+function BriefBadge({ project, onWatch, onReanalyze }: { project: Project; onWatch: () => void; onReanalyze: () => void }) {
+  if (project.briefStatus === "ready" || project.briefStatus === "failed") {
+    const ready = project.briefStatus === "ready";
     return (
-      <Link
-        href={`/docs/project-brief-${project.id}`}
-        className="shrink-0 rounded-full bg-success/15 px-2 py-0.5 text-[11px] font-medium text-success hover:underline"
-      >
-        🧠 Brain ready
-      </Link>
-    );
-  }
-  if (project.briefStatus === "failed") {
-    return (
-      <span className="shrink-0 rounded-full bg-destructive/15 px-2 py-0.5 text-[11px] font-medium text-destructive">
-        Brain analysis failed
-      </span>
+      <div className="flex shrink-0 items-center gap-1.5">
+        {ready ? (
+          <Link
+            href={`/docs/project-brief-${project.id}`}
+            className="rounded-full bg-success/15 px-2 py-0.5 text-[11px] font-medium text-success hover:underline"
+          >
+            🧠 Brain ready
+          </Link>
+        ) : (
+          <span className="rounded-full bg-destructive/15 px-2 py-0.5 text-[11px] font-medium text-destructive">
+            Brain analysis failed
+          </span>
+        )}
+        <button
+          type="button"
+          onClick={onReanalyze}
+          title="Re-run analysis (the brief doesn't update on its own as the repo changes)"
+          className="text-[11px] text-muted-foreground hover:text-foreground"
+        >
+          ↻ Re-analyze
+        </button>
+      </div>
     );
   }
   return (
-    <span className="shrink-0 rounded-full bg-secondary px-2 py-0.5 text-[11px] font-medium text-muted-foreground">
-      Building brain…
-    </span>
+    <button
+      type="button"
+      onClick={onWatch}
+      className="shrink-0 rounded-full bg-secondary px-2 py-0.5 text-[11px] font-medium text-muted-foreground hover:text-foreground"
+    >
+      Building brain… (watch)
+    </button>
   );
 }
 
 export default function ProjectsPage() {
   const router = useRouter();
+  const queryClient = useQueryClient();
   const { setBoardId } = useBoard();
   const [newProjectOpen, setNewProjectOpen] = useState(false);
+  const [watchingProjectId, setWatchingProjectId] = useState<string | null>(null);
 
   const projectsQuery = useQuery({
     queryKey: ["projects"],
@@ -69,9 +90,21 @@ export default function ProjectsPage() {
   });
   const boardsQuery = useQuery({ queryKey: ["boards"], queryFn: api.listBoards });
 
+  const analyzerRunQuery = useQuery({
+    queryKey: ["project-analyzer-run", watchingProjectId],
+    queryFn: () => api.getProjectAnalyzerRun(watchingProjectId!),
+    enabled: !!watchingProjectId,
+  });
+
+  const reanalyzeMutation = useMutation({
+    mutationFn: (projectId: string) => api.reanalyzeProject(projectId),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["projects"] }),
+  });
+
   const projects = projectsQuery.data ?? [];
   const boards = boardsQuery.data ?? [];
   const loading = projectsQuery.isLoading || boardsQuery.isLoading;
+  const watchingProject = projects.find((p) => p.id === watchingProjectId) ?? null;
 
   function handleOpen(projectId: string) {
     const board = boards.find((b) => b.projectId === projectId);
@@ -137,7 +170,11 @@ export default function ProjectsPage() {
                     <div className="truncate font-mono text-xs text-muted-foreground">
                       {project.repoUrl ? `${project.repoUrl} → ${project.repoPath}` : project.repoPath}
                     </div>
-                    <BriefBadge project={project} />
+                    <BriefBadge
+                      project={project}
+                      onWatch={() => setWatchingProjectId(project.id)}
+                      onReanalyze={() => reanalyzeMutation.mutate(project.id)}
+                    />
                   </div>
                 </div>
               </div>
@@ -154,6 +191,25 @@ export default function ProjectsPage() {
       )}
 
       <NewProjectModal open={newProjectOpen} onClose={() => setNewProjectOpen(false)} />
+
+      <Dialog
+        open={!!watchingProjectId}
+        onClose={() => setWatchingProjectId(null)}
+        title={`Building brain — ${watchingProject?.name ?? ""}`}
+        description="The analyzer agent exploring this repo, live."
+      >
+        {analyzerRunQuery.data ? (
+          <AgentSessionPanel
+            agentRunId={analyzerRunQuery.data.id}
+            roleName="analyzer"
+            live={analyzerRunQuery.data.status === "running"}
+          />
+        ) : (
+          <p className="text-sm text-muted-foreground">
+            {analyzerRunQuery.isLoading ? "Loading…" : "No run recorded for this project yet."}
+          </p>
+        )}
+      </Dialog>
     </div>
   );
 }

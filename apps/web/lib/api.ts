@@ -143,6 +143,12 @@ export const api = {
   getProject: (id: string) => request<Project>(`/projects/${id}`),
   createProject: (input: { name: string; repoPath?: string; repoUrl?: string }) =>
     request<{ project: Project; board: Board }>("/projects", { method: "POST", body: JSON.stringify(input) }),
+  getProjectAnalyzerRun: (projectId: string) =>
+    request<{ id: string; status: string; startedAt: string | null; finishedAt: string | null }>(
+      `/projects/${projectId}/analyzer-run`,
+    ),
+  reanalyzeProject: (projectId: string) =>
+    request<{ briefStatus: string }>(`/projects/${projectId}/reanalyze`, { method: "POST" }),
   getConnections: () =>
     request<{ github: { connected: boolean; repo: string | null }; claude: { connected: boolean; version: string | null } }>(
       "/connections",

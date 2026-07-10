@@ -1,6 +1,6 @@
 import type { FastifyPluginAsync } from "fastify";
-import { eq } from "drizzle-orm";
-import { boards, projects } from "@loopeng/db";
+import { desc, eq } from "drizzle-orm";
+import { agentRuns, boards, projects } from "@loopeng/db";
 import { ProjectCreateInputSchema } from "@loopeng/shared";
 import { runProjectAnalyzerAgent } from "@loopeng/agents";
 import { cloneProjectRepo, InvalidRepoError, isValidGitRepoRoot, RepoCloneError } from "@loopeng/worktree-manager";
@@ -74,5 +74,45 @@ export const projectRoutes: FastifyPluginAsync = async (fastify) => {
       return;
     }
     return project;
+  });
+
+  // The analyzer run that's currently building (or last built) this
+  // project's brief -- lets the UI attach a live AgentSessionPanel via the
+  // existing /agent-runs/:id/socket bridge (that route is keyed on
+  // agentRunId alone, no card required, so this is the only piece that was
+  // actually missing: a way to find *which* run to attach to for a project).
+  fastify.get<{ Params: { id: string } }>("/projects/:id/analyzer-run", async (request, reply) => {
+    const [run] = await fastify.db
+      .select({ id: agentRuns.id, status: agentRuns.status, startedAt: agentRuns.startedAt, finishedAt: agentRuns.finishedAt })
+      .from(agentRuns)
+      .where(eq(agentRuns.projectId, request.params.id))
+      .orderBy(desc(agentRuns.startedAt))
+      .limit(1);
+    if (!run) {
+      reply.status(404).send({ error: "not_found" });
+      return;
+    }
+    return run;
+  });
+
+  // Manual refresh: the brief is a snapshot taken once at registration, not
+  // something that stays in sync with the repo as cards land -- there's no
+  // scheduled re-analysis. This is the honest way to update it on demand
+  // instead of pretending it's always current.
+  fastify.post<{ Params: { id: string } }>("/projects/:id/reanalyze", async (request, reply) => {
+    const [project] = await fastify.db.select().from(projects).where(eq(projects.id, request.params.id));
+    if (!project) {
+      reply.status(404).send({ error: "not_found" });
+      return;
+    }
+    if (!isValidGitRepoRoot(project.repoPath)) {
+      reply.status(400).send({ error: "invalid_repo", message: new InvalidRepoError(project.repoPath).message });
+      return;
+    }
+
+    await fastify.db.update(projects).set({ briefStatus: "analyzing" }).where(eq(projects.id, project.id));
+    void runProjectAnalyzerAgent({ id: project.id, name: project.name, repoPath: project.repoPath });
+
+    reply.status(202).send({ briefStatus: "analyzing" });
   });
 };

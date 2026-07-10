@@ -196,6 +196,11 @@ export const agentRoles = pgTable("agent_roles", {
 export const agentRuns = pgTable("agent_runs", {
   id: uuid("id").primaryKey().defaultRandom(),
   cardId: uuid("card_id").references(() => cards.id, { onDelete: "cascade" }),
+  // Set only for project-scoped runs that have no card (currently: the
+  // analyzer). Lets the UI look up "the latest brain-build run for project
+  // X" -- without this, that run is an orphaned row nothing can query by
+  // project, and the frontend has no way to attach a live session view to it.
+  projectId: uuid("project_id").references(() => projects.id),
   agentRoleId: uuid("agent_role_id").references(() => agentRoles.id),
   worktreeId: uuid("worktree_id").references((): AnyPgColumn => worktrees.id),
   parentAgentRunId: uuid("parent_agent_run_id").references((): AnyPgColumn => agentRuns.id),
