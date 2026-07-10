@@ -94,3 +94,18 @@
     @apply bg-background text-foreground;
   }
 }
+
+/* Thin dark scrollbars, scoped to .theme-dark (matches Board.dc.html's own
+   ::-webkit-scrollbar rules) -- the default OS/browser scrollbar is fine on
+   the light-themed pages, but stands out badly against the dark board. */
+.theme-dark ::-webkit-scrollbar {
+  height: 8px;
+  width: 8px;
+}
+.theme-dark ::-webkit-scrollbar-thumb {
+  background: hsl(var(--border));
+  border-radius: 4px;
+}
+.theme-dark ::-webkit-scrollbar-track {
+  background: transparent;
+}

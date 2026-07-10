@@ -142,11 +142,11 @@ function BoardPageInner() {
   }
 
   return (
-    <div className="flex min-h-0 flex-1">
-      <div className="flex min-h-0 flex-1 flex-col">
+    <div className="flex min-h-0 min-w-0 flex-1">
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col">
         <StagePipelineBar cards={cards} />
-        <div className="flex min-h-0 flex-1 gap-3 p-4">
-          <div className="flex flex-1 gap-3 overflow-x-auto">
+        <div className="flex min-h-0 min-w-0 flex-1 gap-3 p-4">
+          <div className="flex min-w-0 flex-1 gap-3 overflow-x-auto">
             {PHASE_3_COLUMNS.map(({ state, title }) => (
             <Column
               key={state}
