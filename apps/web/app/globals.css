@@ -42,6 +42,50 @@
   }
 }
 
+/* Scoped dark palette from the Board.dc.html design (Claude Design project
+   "LoopEng interaction inventory") -- applied via a `.theme-dark` class, not
+   on :root, so /docs, /activity, and /card/[cardId] keep today's light theme
+   untouched. Every existing component already reads these same hsl(var(--x))
+   tokens, so wrapping any subtree in this class reskins it with zero
+   component-level changes. */
+@layer base {
+  .theme-dark {
+    --background: 222 32% 6%;
+    --foreground: 210 25% 92%;
+
+    --card: 220 24% 11%;
+    --card-foreground: 210 25% 92%;
+
+    --popover: 220 24% 11%;
+    --popover-foreground: 210 25% 92%;
+
+    --primary: 172 66% 50%;
+    --primary-foreground: 165 60% 8%;
+
+    --secondary: 220 20% 15%;
+    --secondary-foreground: 210 25% 92%;
+
+    --muted: 220 20% 15%;
+    --muted-foreground: 220 10% 45%;
+
+    --accent: 220 20% 13%;
+    --accent-foreground: 210 25% 92%;
+
+    --destructive: 3 90% 65%;
+    --destructive-foreground: 210 40% 98%;
+
+    --success: 132 45% 49%;
+    --success-foreground: 145 60% 8%;
+
+    --warning: 38 65% 49%;
+    --warning-foreground: 42 65% 8%;
+
+    --border: 220 16% 19%;
+    --input: 220 16% 19%;
+    --ring: 172 66% 50%;
+  }
+}
+
 @layer base {
   * {
     @apply border-border;

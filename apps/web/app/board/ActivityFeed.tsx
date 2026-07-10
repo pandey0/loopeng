@@ -12,26 +12,39 @@ export function ActivityFeed({ boardId }: { boardId: string | null }) {
   const { events } = useNotifications();
 
   return (
-    <div className="min-w-[260px] flex-[0_0_280px] rounded-lg bg-muted p-2.5">
-      <div className="mb-2 text-xs font-bold uppercase text-muted-foreground">Activity</div>
-      {!boardId || events.length === 0 ? (
-        <p className="text-xs text-muted-foreground">No activity yet.</p>
-      ) : (
-        <ul className="m-0 list-none p-0 text-xs">
-          {events.map((event) => (
-            <li key={event.id} className="mb-1.5">
-              <span className="text-muted-foreground">{new Date(event.createdAt).toLocaleTimeString()}</span>{" "}
-              {event.entityType === "card" ? (
-                <Link href={`/card/${event.entityId}`} className="text-primary hover:underline">
-                  {describeEvent(event)}
-                </Link>
-              ) : (
-                describeEvent(event)
-              )}
-            </li>
-          ))}
-        </ul>
-      )}
+    <div className="flex w-[290px] shrink-0 flex-col border-l border-border">
+      <div className="flex shrink-0 items-center justify-between px-4 pb-2.5 pt-3.5">
+        <div className="text-[12.5px] font-bold uppercase tracking-wide text-muted-foreground">Activity</div>
+        {boardId && (
+          <Link href={`/board/${boardId}/graph`} className="text-[11.5px] font-semibold text-primary hover:underline">
+            Dependency graph →
+          </Link>
+        )}
+      </div>
+      <div className="flex-1 overflow-y-auto px-4 pb-4">
+        {!boardId || events.length === 0 ? (
+          <p className="text-xs text-muted-foreground">No activity yet.</p>
+        ) : (
+          <ul className="m-0 flex list-none flex-col gap-2.5 p-0">
+            {events.map((event) => (
+              <li key={event.id} className="border-l-2 border-border pl-2.5">
+                <div className="text-xs leading-relaxed text-foreground">
+                  {event.entityType === "card" ? (
+                    <Link href={`/card/${event.entityId}`} className="hover:underline">
+                      {describeEvent(event)}
+                    </Link>
+                  ) : (
+                    describeEvent(event)
+                  )}
+                </div>
+                <div className="mt-0.5 font-mono text-[10.5px] text-muted-foreground">
+                  {new Date(event.createdAt).toLocaleTimeString()}
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
     </div>
   );
 }

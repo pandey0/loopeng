@@ -15,6 +15,10 @@ export function TopBar() {
   const { boardId } = useBoard();
   const [intakeOpen, setIntakeOpen] = useState(false);
   const [newProjectOpen, setNewProjectOpen] = useState(false);
+  // Local-only per the design's pause/resume-all-agents control -- there's no
+  // backend concept of pausing every agent run, no API for it. Kept as a
+  // visual affordance, not wired to anything real.
+  const [agentsPaused, setAgentsPaused] = useState(false);
 
   const items: NotificationItem[] = events.map((event) => ({
     id: event.id,
@@ -29,6 +33,19 @@ export function TopBar() {
     <header className="flex h-14 shrink-0 items-center justify-between border-b bg-card px-4">
       <BoardSwitcher />
       <div className="flex items-center gap-2">
+        <button
+          type="button"
+          title="Not connected to anything yet -- visual preview only"
+          onClick={() => setAgentsPaused((p) => !p)}
+          className={
+            agentsPaused
+              ? "flex items-center gap-2 rounded-md border border-warning bg-warning px-3.5 py-2 text-sm font-semibold text-warning-foreground"
+              : "flex items-center gap-2 rounded-md border border-input bg-transparent px-3.5 py-2 text-sm font-semibold text-muted-foreground hover:bg-accent"
+          }
+        >
+          <span>{agentsPaused ? "▶" : "⏸"}</span>
+          {agentsPaused ? "Resume agents" : "Pause all agents"}
+        </button>
         <Button size="sm" variant="outline" onClick={() => setNewProjectOpen(true)}>
           New project
         </Button>

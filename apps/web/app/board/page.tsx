@@ -11,6 +11,7 @@ import { useBoard } from "../providers/BoardProvider";
 import { ActivityFeed } from "./ActivityFeed";
 import { ApprovalDialog } from "./ApprovalDialog";
 import { AgentSessionPanel } from "../card/[cardId]/AgentSessionPanel";
+import { StagePipelineBar } from "./StagePipelineBar";
 
 const HIGHLIGHT_DURATION_MS = 4000;
 // While anything is actively running, poll listCards so the board tile's
@@ -131,15 +132,9 @@ function BoardPageInner() {
   }
 
   return (
-    <div>
-      {boardId && (
-        <div className="mb-4 flex items-center justify-end">
-          <Link href={`/board/${boardId}/graph`} className="text-sm text-primary hover:underline">
-            Dependency graph →
-          </Link>
-        </div>
-      )}
-      <div className="flex gap-3">
+    <div className="flex min-h-0 flex-1 flex-col">
+      <StagePipelineBar cards={cards} />
+      <div className="flex min-h-0 flex-1 gap-3 p-4">
         <div className="flex flex-1 gap-3 overflow-x-auto">
           {PHASE_3_COLUMNS.map(({ state, title }) => (
             <Column

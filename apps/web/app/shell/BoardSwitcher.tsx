@@ -23,17 +23,20 @@ export function BoardSwitcher() {
   }
 
   return (
-    <select
-      value={boardId ?? ""}
-      onChange={(e) => handleChange(e.target.value)}
-      aria-label="Switch board"
-      className="h-9 rounded-md border border-input bg-background px-3 text-sm shadow-sm"
-    >
-      {boards.map((b) => (
-        <option key={b.id} value={b.id}>
-          {b.name}
-        </option>
-      ))}
-    </select>
+    <div className="flex items-center gap-2 rounded-md border border-input bg-secondary px-3 py-1.5">
+      <span className="text-sm">🗂️</span>
+      <select
+        value={boardId ?? ""}
+        onChange={(e) => handleChange(e.target.value)}
+        aria-label="Switch board"
+        className="border-none bg-transparent text-[13.5px] font-semibold text-foreground outline-none"
+      >
+        {boards.map((b) => (
+          <option key={b.id} value={b.id} className="bg-secondary text-foreground">
+            {b.name}
+          </option>
+        ))}
+      </select>
+    </div>
   );
 }
