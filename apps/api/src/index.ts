@@ -12,6 +12,7 @@ import { cardRoutes } from "./routes/cards.js";
 import { eventRoutes } from "./routes/events.js";
 import { intakeRoutes } from "./routes/intake.js";
 import { agentRunSocketRoutes } from "./routes/agent-run-socket.js";
+import { connectionRoutes } from "./routes/connections.js";
 
 const fastify = Fastify({ logger: true });
 
@@ -28,6 +29,7 @@ await fastify.register(cardRoutes);
 await fastify.register(eventRoutes);
 await fastify.register(intakeRoutes);
 await fastify.register(agentRunSocketRoutes);
+await fastify.register(connectionRoutes);
 
 const port = Number(process.env.API_PORT ?? 4000);
 

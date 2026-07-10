@@ -142,6 +142,10 @@ export const api = {
   listProjects: () => request<Project[]>("/projects"),
   createProject: (input: { name: string; repoPath: string }) =>
     request<{ project: Project; board: Board }>("/projects", { method: "POST", body: JSON.stringify(input) }),
+  getConnections: () =>
+    request<{ github: { connected: boolean; repo: string | null }; claude: { connected: boolean; version: string | null } }>(
+      "/connections",
+    ),
   intake: (boardId: string, requestText: string) =>
     request<IntakeStartResult>(`/boards/${boardId}/intake`, { method: "POST", body: JSON.stringify({ requestText }) }),
   getIntakeStatus: (boardId: string, agentRunId: string) =>

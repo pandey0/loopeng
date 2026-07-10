@@ -7,10 +7,10 @@ import { NotificationProvider } from "./providers/NotificationProvider";
 import { AppShell } from "./shell/AppShell";
 import "./globals.css";
 
-// Only feed the .theme-dark surfaces (board + shell chrome, see globals.css) —
-// exposed as CSS vars on <html> so they're available everywhere, but body
-// keeps font-sans by default so untouched pages (docs/activity/card detail)
-// don't shift typeface.
+// Every page in the source design uses `font-family:'Space Grotesk',sans-serif`
+// as its base typeface and JetBrains Mono for anything mono-tagged (badges,
+// timestamps, code) -- this is app-wide now that AppShell makes the whole app
+// dark (see globals.css), not scoped to one route.
 const spaceGrotesk = Space_Grotesk({ subsets: ["latin"], variable: "--font-display" });
 const jetbrainsMono = JetBrains_Mono({ subsets: ["latin"], variable: "--font-mono" });
 
@@ -22,7 +22,7 @@ export const metadata = {
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
     <html lang="en" className={`${spaceGrotesk.variable} ${jetbrainsMono.variable}`}>
-      <body className="m-0 font-sans text-foreground antialiased">
+      <body className="m-0 font-display text-foreground antialiased">
         <QueryProvider>
           <ToastProvider>
             <BoardProvider>

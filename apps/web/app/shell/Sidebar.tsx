@@ -57,7 +57,7 @@ export function Sidebar() {
 
   return (
     <aside className="flex h-full w-[200px] shrink-0 flex-col bg-background px-3 py-4">
-      <Link href="/board" className="mb-1.5 flex items-center gap-2.5 border-b border-border px-1.5 pb-4 no-underline">
+      <Link href="/projects" className="mb-1.5 flex items-center gap-2.5 border-b border-border px-1.5 pb-4 no-underline">
         <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-gradient-to-br from-primary to-primary/80 font-mono text-[13px] font-bold text-primary-foreground">
           L
         </div>
@@ -74,16 +74,18 @@ export function Sidebar() {
             active={pathname === item.href || pathname.startsWith(`${item.href}/`)}
           />
         ))}
-        {/* Inbox and Settings aren't built yet -- shown per the design for
-            visual completeness but intentionally not wired to a route. The
-            unread badge reuses the real notification count as a preview of
-            what Inbox would show, it isn't a separate inbox data source. */}
-        <NavRow href="#" icon="📥" label="Inbox" active={false} badge={unreadCount} disabled />
+        <NavRow
+          href="/inbox"
+          icon="📥"
+          label="Inbox"
+          active={pathname === "/inbox"}
+          badge={unreadCount}
+        />
       </nav>
 
       <div className="flex-1" />
 
-      <NavRow href="#" icon="⚙️" label="Settings" active={false} disabled />
+      <NavRow href="/settings" icon="⚙️" label="Settings" active={pathname === "/settings"} />
     </aside>
   );
 }
