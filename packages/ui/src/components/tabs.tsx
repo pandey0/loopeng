@@ -20,7 +20,7 @@ export function Tabs({ items, defaultValue, className }: TabsProps) {
 
   return (
     <div className={className}>
-      <div role="tablist" className="mb-4 flex gap-1 border-b">
+      <div role="tablist" className="mb-6 flex gap-1 border-b border-border">
         {items.map((item) => (
           <button
             key={item.value}
@@ -29,10 +29,8 @@ export function Tabs({ items, defaultValue, className }: TabsProps) {
             aria-selected={active === item.value}
             onClick={() => setActive(item.value)}
             className={cn(
-              "-mb-px border-b-2 px-3 py-2 text-sm font-medium transition-colors",
-              active === item.value
-                ? "border-primary text-primary"
-                : "border-transparent text-muted-foreground hover:text-foreground",
+              "-mb-px mr-5 border-b-2 px-1 py-[10px] text-[13.5px] font-bold transition-colors",
+              active === item.value ? "border-primary text-foreground" : "border-transparent text-muted-foreground hover:text-foreground",
             )}
           >
             {item.label}
