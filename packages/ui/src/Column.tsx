@@ -20,6 +20,8 @@ export interface ColumnProps {
   onCardDragEnd?: () => void;
   /** Card ids to visually flag as just-created (e.g. from intake), briefly pulsing. */
   highlightedCardIds?: ReadonlySet<string>;
+  /** Card id under keyboard (j/k) navigation focus, if any. */
+  focusedCardId?: string | null;
   /** Lets callers keep a DOM ref per card (e.g. to scrollIntoView a highlighted card). */
   cardRef?: (cardId: string, el: HTMLDivElement | null) => void;
   children?: ReactNode;
@@ -37,6 +39,7 @@ export function Column({
   onCardDragStart,
   onCardDragEnd,
   highlightedCardIds,
+  focusedCardId,
   cardRef,
 }: ColumnProps) {
   const [isDragOver, setIsDragOver] = useState(false);
@@ -86,6 +89,7 @@ export function Column({
               onWatchClick={onCardWatchClick}
               draggable={false}
               highlighted={highlightedCardIds?.has(card.id)}
+              focused={focusedCardId === card.id}
             />
             {renderCardFooter?.(card)}
           </div>

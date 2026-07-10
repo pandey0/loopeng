@@ -24,13 +24,15 @@ export interface CardTileProps {
   draggable?: boolean;
   /** Briefly flags a just-created card (e.g. from intake) so it's easy to spot on the board. */
   highlighted?: boolean;
+  /** Solid (non-pulsing) ring for keyboard (j/k) navigation focus -- distinct from the pulse used for `highlighted`. */
+  focused?: boolean;
   onDragStart?: (card: CardWithStatus) => void;
   onClick?: (card: CardWithStatus) => void;
   /** Opens a live session view for the card's active run without navigating off the board — only shown when a live session is actually attachable. */
   onWatchClick?: (card: CardWithStatus) => void;
 }
 
-export function CardTile({ card, draggable = true, highlighted = false, onDragStart, onClick, onWatchClick }: CardTileProps) {
+export function CardTile({ card, draggable = true, highlighted = false, focused = false, onDragStart, onClick, onWatchClick }: CardTileProps) {
   const status = getStatusMeta(card.state);
   const activeAgentRun = card.activeAgentRun ?? null;
   const isActive = activeAgentRun !== null;
@@ -44,6 +46,7 @@ export function CardTile({ card, draggable = true, highlighted = false, onDragSt
         "mb-2 rounded-lg border border-border bg-card p-3 transition-colors hover:border-muted-foreground/40",
         draggable ? "cursor-grab" : "cursor-pointer",
         isActive && "ring-1 ring-primary/50",
+        focused && "ring-2 ring-primary",
         highlighted && "ring-2 ring-primary animate-pulse",
       )}
     >

@@ -12,6 +12,8 @@ import { ActivityFeed } from "./ActivityFeed";
 import { ApprovalDialog } from "./ApprovalDialog";
 import { StagePipelineBar } from "./StagePipelineBar";
 import { AgentSessionDrawer } from "./AgentSessionDrawer";
+import { ShortcutsHelpDialog } from "./ShortcutsHelpDialog";
+import { useBoardKeyboardShortcuts } from "./useBoardKeyboardShortcuts";
 
 const HIGHLIGHT_DURATION_MS = 4000;
 // While anything is actively running, poll listCards so the board tile's
@@ -63,6 +65,15 @@ function BoardPageInner() {
     refetchInterval: (query) => (query.state.data?.some((c) => c.activeAgentRun) ? ACTIVE_RUN_POLL_MS : false),
   });
 
+  const cards = cardsQuery.data ?? [];
+  const flatCards = PHASE_3_COLUMNS.flatMap(({ state }) => cards.filter((c) => c.state === state));
+  const { focusedCardId, shortcutsOpen, closeShortcuts } = useBoardKeyboardShortcuts(flatCards, setApprovalCardId);
+
+  useEffect(() => {
+    if (!focusedCardId) return;
+    cardEls.current.get(focusedCardId)?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  }, [focusedCardId]);
+
   // Lands here from the intake modal's "View on board" action
   // (?highlight=id1,id2,...) — pulses the new cards and scrolls the first
   // one into view, then strips the param so it doesn't persist on refresh.
@@ -87,7 +98,6 @@ function BoardPageInner() {
     return <p>No boards yet. Seed the database first (pnpm db:seed).</p>;
   }
 
-  const cards = cardsQuery.data ?? [];
   const byState = (state: CardState) => cards.filter((c) => c.state === state);
 
   async function handleDrop(cardId: string, toState: CardState) {
@@ -150,6 +160,7 @@ function BoardPageInner() {
               onCardDragStart={setDraggingCard}
               onCardDragEnd={() => setDraggingCard(null)}
               highlightedCardIds={highlightIds}
+              focusedCardId={focusedCardId}
               cardRef={(cardId, el) => {
                 if (el) cardEls.current.set(cardId, el);
                 else cardEls.current.delete(cardId);
@@ -218,6 +229,12 @@ function BoardPageInner() {
         onClose={() => setApprovalCardId(null)}
         onApprove={(cardId) => handleApprove(cardId)}
       />
+      {!watchCard?.activeAgentRun && !approvalCardId && (
+        <div className="fixed bottom-4 left-4 z-30 rounded-full border border-border bg-card px-3 py-1.5 font-mono text-[11px] text-muted-foreground">
+          press <span className="text-foreground">?</span> for shortcuts
+        </div>
+      )}
+      <ShortcutsHelpDialog open={shortcutsOpen} onClose={closeShortcuts} />
     </div>
   );
 }
