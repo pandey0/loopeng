@@ -6,6 +6,47 @@ import { Badge, Button, Dialog, StatusBadge } from "@loopeng/ui";
 import type { GateResultStatus } from "@loopeng/shared";
 import { api, type CardDetailAgentRun } from "../../lib/api";
 import { AgentSessionPanel } from "../card/[cardId]/AgentSessionPanel";
+import { parseDiffHunks } from "./diff-hunks";
+
+const COLLAPSE_CONTEXT_THRESHOLD = 4;
+
+function DiffView({ diff }: { diff: string }) {
+  const hunks = useMemo(() => parseDiffHunks(diff), [diff]);
+  const [expanded, setExpanded] = useState<Record<number, boolean>>({});
+
+  return (
+    <pre className="max-h-80 overflow-auto whitespace-pre-wrap break-all rounded-md border bg-muted/40 p-2.5 text-[11px]">
+      {hunks.map((hunk, i) => {
+        const canCollapse = hunk.leadingContext.length > COLLAPSE_CONTEXT_THRESHOLD;
+        const isOpen = expanded[i] ?? false;
+        return (
+          <div key={i}>
+            <div>{hunk.header}</div>
+            {canCollapse ? (
+              <>
+                <button
+                  type="button"
+                  onClick={() => setExpanded((e) => ({ ...e, [i]: !isOpen }))}
+                  className="my-0.5 block w-full border-b border-dashed border-border/60 py-0.5 text-center text-muted-foreground hover:text-foreground"
+                >
+                  ⋯ {isOpen ? "▾" : "▸"} {hunk.leadingContext.length} unchanged lines above ⋯
+                </button>
+                {isOpen && hunk.leadingContext.map((l, j) => <div key={j}>{l}</div>)}
+              </>
+            ) : (
+              hunk.leadingContext.map((l, j) => <div key={j}>{l}</div>)
+            )}
+            {hunk.rest.map((l, j) => (
+              <div key={j} className={l.startsWith("+") ? "text-success" : l.startsWith("-") ? "text-destructive" : undefined}>
+                {l}
+              </div>
+            ))}
+          </div>
+        );
+      })}
+    </pre>
+  );
+}
 
 export interface ApprovalDialogProps {
   cardId: string | null;
@@ -117,11 +158,14 @@ export function ApprovalDialog({ cardId, onClose, onApprove }: ApprovalDialogPro
             >
               {diffOpen ? "Hide diff" : "Show diff"}
             </button>
-            {diffOpen && (
-              <pre className="max-h-80 overflow-auto whitespace-pre-wrap break-all rounded-md border bg-muted/40 p-2.5 text-[11px]">
-                {diffQuery.isLoading ? "Loading diff…" : diffQuery.data?.diff || "No diff available (worktree may already be torn down)."}
-              </pre>
-            )}
+            {diffOpen &&
+              (diffQuery.isLoading ? (
+                <p className="text-xs text-muted-foreground">Loading diff…</p>
+              ) : diffQuery.data?.diff ? (
+                <DiffView diff={diffQuery.data.diff} />
+              ) : (
+                <p className="text-xs text-muted-foreground">No diff available (worktree may already be torn down).</p>
+              ))}
           </div>
 
           {card.linkedDocs.length > 0 && (
