@@ -95,7 +95,7 @@ Per-card dispatch is `orchestrateCard()` in `packages/orchestrator/src/loop.ts`:
 
 `HookRegistry` fires lifecycle hooks (`beforeCardPickup`, `afterWorktreeCreated`, `beforeSubAgentVerify`, `afterGateRun`, `beforeDeploy`, `onFailure`) that connectors and future automations subscribe to.
 
-**Pausing the loop**: setting `ORCHESTRATOR_DISABLED=1` on the API process skips wiring both triggers entirely (see `apps/api/src/plugins/orchestrator.ts`) -- cards stay wherever they are, no new dispatch happens, but the API itself keeps serving requests.
+**Enabling the loop**: cron/event dispatch is opt-in, not opt-out -- an API process only wires both triggers if `ORCHESTRATOR_ENABLED=1` is set in its environment (see `apps/api/src/plugins/orchestrator.ts`). Only the one real instance (`infrastructure/docker/docker-compose.yml`) sets it; a worktree-local/dev copy of `apps/api` boots with dispatch off by default, so it can serve boards/cards/docs CRUD without racing the real orchestrator over the same `DATABASE_URL`. Without it set, cards stay wherever they are, no new dispatch happens, but the API itself keeps serving requests.
 
 ## 5. Agent execution (`packages/agents`)
 

@@ -2,6 +2,36 @@ import { spawn } from "node:child_process";
 import { eq, sql } from "drizzle-orm";
 import { agentRuns, db } from "@loopeng/db";
 
+// Every claude CLI child below is spawned `detached: true` so it becomes the
+// leader of its own OS process group instead of just a plain child of this
+// Node process. That matters because the CLI's own Bash tool can start a
+// long-running subprocess inside the agent's worktree (e.g. `tsx watch &`
+// for manual UI verification) that outlives the CLI turn that started it --
+// killing only the CLI's immediate PID leaves that dev server running
+// forever, pointed at the same DATABASE_URL as everything else (this is
+// exactly what happened in the 2026-07-02 incident: a stray dev server
+// booted a second orchestrator that raced the real one). A background job
+// started with `&` inside the CLI's process tree is never setsid'd away, so
+// it stays in the same process group -- signaling the *group* (negative pid)
+// reaches it even after the CLI's own PID has already exited and the job has
+// been reparented to init.
+export function killProcessGroup(pid: number, signal: NodeJS.Signals = "SIGTERM"): void {
+  try {
+    process.kill(-pid, signal);
+  } catch {
+    // group already gone (process + every descendant already exited) --
+    // ESRCH here is the success case, not an error worth surfacing.
+  }
+}
+
+// Escalates a still-alive group to SIGKILL after a grace period. Timer is
+// unref'd so it never keeps the host process (or a test's event loop) alive
+// on its own -- if everything already exited cleanly, the escalation is
+// just a no-op ESRCH.
+function scheduleForceKill(pid: number, graceMs = 3000): void {
+  setTimeout(() => killProcessGroup(pid, "SIGKILL"), graceMs).unref();
+}
+
 export interface RunClaudeCliInput {
   cwd: string;
   prompt: string;
@@ -38,7 +68,7 @@ export function runClaudeCli(input: RunClaudeCliInput): Promise<ClaudeCliResult>
   if (input.mcpConfig) args.push("--mcp-config", JSON.stringify(input.mcpConfig));
 
   return new Promise((resolve, reject) => {
-    const child = spawn("claude", args, { cwd: input.cwd, env: process.env });
+    const child = spawn("claude", args, { cwd: input.cwd, env: process.env, detached: true });
 
     let stdout = "";
     let stderr = "";
@@ -48,6 +78,13 @@ export function runClaudeCli(input: RunClaudeCliInput): Promise<ClaudeCliResult>
     child.on("error", (err) => reject(new Error(`failed to spawn claude cli: ${err.message}`)));
 
     child.on("close", (code) => {
+      // The CLI turn itself has ended, but anything it backgrounded inside
+      // the worktree (dev servers, watchers) may still be alive in the same
+      // process group -- sweep it regardless of how this turn concluded.
+      if (child.pid) {
+        killProcessGroup(child.pid);
+        scheduleForceKill(child.pid);
+      }
       if (code !== 0 && !stdout.trim()) {
         reject(new Error(`claude cli exited ${code}: ${stderr || "no output"}`));
         return;
@@ -159,7 +196,7 @@ export function runClaudeCliStreaming(input: RunClaudeCliStreamingInput): Stream
   if (input.appendSystemPrompt) args.push("--append-system-prompt", input.appendSystemPrompt);
   if (input.mcpConfig) args.push("--mcp-config", JSON.stringify(input.mcpConfig));
 
-  const child = spawn("claude", args, { cwd: input.cwd, env: process.env });
+  const child = spawn("claude", args, { cwd: input.cwd, env: process.env, detached: true });
 
   const handlers = new Set<StreamEventHandler>();
   const appendTranscript = makeTranscriptAppender(input.agentRunId);
@@ -195,6 +232,15 @@ export function runClaudeCliStreaming(input: RunClaudeCliStreamingInput): Stream
 
   const exitPromise = new Promise<{ code: number | null; signal: NodeJS.Signals | null }>((resolve) => {
     child.on("close", (code, signal) => {
+      // The CLI process itself has exited, but a dev server or watcher it
+      // backgrounded inside the worktree during this turn may still be
+      // alive in the same process group -- sweep it here so it's gone the
+      // moment this run finishes, success or failure, not just when close()
+      // happens to have been called first.
+      if (child.pid) {
+        killProcessGroup(child.pid);
+        scheduleForceKill(child.pid);
+      }
       sessionRegistry.unregister(input.agentRunId);
       resolve({ code, signal });
     });
@@ -223,8 +269,12 @@ export function runClaudeCliStreaming(input: RunClaudeCliStreamingInput): Stream
       } catch {
         // stdin may already be closed if the process exited
       }
-      if (child.exitCode === null && child.signalCode === null) {
-        child.kill("SIGTERM");
+      if (child.exitCode === null && child.signalCode === null && child.pid) {
+        // Signal the whole process group, not just the CLI's own PID -- see
+        // the module-level comment on killProcessGroup for why a lone
+        // child.kill() here would leave a backgrounded dev server running.
+        killProcessGroup(child.pid);
+        scheduleForceKill(child.pid);
       }
     },
     waitForExit() {
