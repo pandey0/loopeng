@@ -2,20 +2,20 @@
 
 ## Local Development
 
-### Running via Turborepo (recommended)
+### Running via Turborepo
 
 ```
 pnpm dev
 ```
 
-This runs `turbo run dev` from the repo root, which resolves each workspace's cwd correctly, including `apps/api`.
+This runs `turbo run dev` from the repo root, but Turbo (like `pnpm --filter`) still executes each workspace's task with `cwd` set to that package's own directory — `apps/api` for the api task, not the repo root.
 
 ### Running `apps/api` natively
 
-If you run `apps/api` directly (e.g. `pnpm --filter @loopeng/api dev`, or `tsx src/index.ts` from inside `apps/api`) instead of via `pnpm dev` from the repo root, you **must** set `WIKI_REPO_PATH` explicitly:
+For any native (non-docker) run of `apps/api` — including `pnpm dev` from the repo root, `pnpm --filter @loopeng/api dev`, or `tsx src/index.ts` from inside `apps/api` — you **must** set `WIKI_REPO_PATH` explicitly:
 
 ```
-WIKI_REPO_PATH=<repo-root>/data/wiki-repo pnpm --filter @loopeng/api dev
+WIKI_REPO_PATH=<repo-root>/data/wiki-repo pnpm dev
 ```
 
-`apps/api` defaults `WIKI_REPO_PATH` to `process.cwd()/data/wiki-repo`. Docker pins this correctly via a fixed volume, and `pnpm dev` from the repo root resolves cwd correctly via Turborepo. But a native run launched from any other cwd (e.g. from inside `apps/api`) will silently bootstrap a **new, empty** wiki-repo git checkout at that location instead of using the real one — every doc read/write then silently diverges from the canonical history at the real `data/wiki-repo`.
+`apps/api` defaults `WIKI_REPO_PATH` to `process.cwd()/data/wiki-repo`. Docker is the only setup where this is safe unset, since it pins `WIKI_REPO_PATH` to a fixed volume (`/data/wiki-repo`). Any native run — cwd is always the package directory (`apps/api`), never the repo root, regardless of where the command is invoked from — will silently bootstrap a **new, empty** wiki-repo git checkout at `apps/api/data/wiki-repo` instead of using the real one, and every doc read/write then silently diverges from the canonical history at the real `<repo-root>/data/wiki-repo`.
