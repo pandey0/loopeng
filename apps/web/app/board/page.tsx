@@ -4,7 +4,7 @@ import { Suspense, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Column, Button, Dialog } from "@loopeng/ui";
+import { Column, Button, Dialog, isHumanBlocked } from "@loopeng/ui";
 import type { CardState, CardWithStatus } from "@loopeng/shared";
 import { api } from "../../lib/api";
 import { useBoard } from "../providers/BoardProvider";
@@ -165,16 +165,24 @@ function BoardPageInner() {
                       </Button>
                     )
                   : state === "blocked"
-                    ? (card) => (
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={() => handleRetry(card.id)}
-                          className="-mt-1 mb-2 h-auto px-2 py-1 text-[11px]"
-                        >
-                          Retry
-                        </Button>
-                      )
+                    ? (card) =>
+                        isHumanBlocked(card.blockedReason) ? (
+                          <Link
+                            href={`/card/${card.id}`}
+                            className="-mt-1 mb-2 inline-block rounded-md bg-warning px-2 py-1 text-[11px] font-bold text-warning-foreground"
+                          >
+                            Answer question →
+                          </Link>
+                        ) : (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => handleRetry(card.id)}
+                            className="-mt-1 mb-2 h-auto px-2 py-1 text-[11px]"
+                          >
+                            Retry
+                          </Button>
+                        )
                     : state === "deploy_failed"
                       ? (card) => (
                           <div className="-mt-1 mb-2 flex gap-1.5">

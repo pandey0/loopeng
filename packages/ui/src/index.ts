@@ -7,6 +7,7 @@ export * from "./lib/utils";
 export * from "./lib/status";
 export * from "./lib/agent-run-tree";
 export * from "./lib/agent-transcript";
+export * from "./lib/blocked-reason";
 export * from "./components/button";
 export * from "./components/badge";
 export * from "./components/status-badge";

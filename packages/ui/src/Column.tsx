@@ -59,36 +59,38 @@ export function Column({
         if (cardId) onDropCard?.(cardId, state);
       }}
       className={[
-        "min-w-[220px] flex-[1_0_220px] rounded-lg p-2.5 border transition-colors duration-100",
-        isDragOver ? "bg-teal-50" : "bg-muted",
-        draggingCardState && !isValidTarget ? "border-dashed border-muted-foreground/40 opacity-60" : "border-transparent opacity-100",
+        "flex min-h-0 w-[250px] shrink-0 flex-col rounded-[10px] border transition-colors duration-100",
+        isDragOver ? "bg-primary/10 border-primary/50" : "bg-secondary/40 border-border",
+        draggingCardState && !isValidTarget && !isDragOver ? "border-dashed border-muted-foreground/40 opacity-60" : "opacity-100",
       ].join(" ")}
     >
-      <div className="mb-2 flex items-center gap-1.5 text-xs font-bold uppercase text-muted-foreground">
+      <div className="flex shrink-0 items-center gap-1.5 px-3.5 pb-2.5 pt-3 text-xs font-bold uppercase tracking-wide text-muted-foreground">
         <StatusDot status={state} />
-        {title} <span className="text-muted-foreground/70">({cards.length})</span>
+        {title} <span className="ml-auto rounded-full bg-card px-1.5 py-0.5 font-mono text-[11px] normal-case tracking-normal text-muted-foreground">{cards.length}</span>
       </div>
-      {cards.map((card) => (
-        <div
-          key={card.id}
-          ref={cardRef ? (el) => cardRef(card.id, el) : undefined}
-          draggable
-          onDragStart={(e) => {
-            e.dataTransfer.setData("text/card-id", card.id);
-            onCardDragStart?.(card);
-          }}
-          onDragEnd={() => onCardDragEnd?.()}
-        >
-          <CardTile
-            card={card}
-            onClick={onCardClick}
-            onWatchClick={onCardWatchClick}
-            draggable={false}
-            highlighted={highlightedCardIds?.has(card.id)}
-          />
-          {renderCardFooter?.(card)}
-        </div>
-      ))}
+      <div className="flex-1 overflow-y-auto px-2.5 pb-2.5">
+        {cards.map((card) => (
+          <div
+            key={card.id}
+            ref={cardRef ? (el) => cardRef(card.id, el) : undefined}
+            draggable
+            onDragStart={(e) => {
+              e.dataTransfer.setData("text/card-id", card.id);
+              onCardDragStart?.(card);
+            }}
+            onDragEnd={() => onCardDragEnd?.()}
+          >
+            <CardTile
+              card={card}
+              onClick={onCardClick}
+              onWatchClick={onCardWatchClick}
+              draggable={false}
+              highlighted={highlightedCardIds?.has(card.id)}
+            />
+            {renderCardFooter?.(card)}
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
