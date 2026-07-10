@@ -13,6 +13,8 @@ export interface ApplyTransitionInput {
   toState: CardState;
   actorType: "user" | "agent" | "automation";
   actorId?: string;
+  /** Why -- recorded on the event itself since it's the only durable record once the card moves on. */
+  reason?: string;
 }
 
 export class InvalidTransitionError extends Error {
@@ -42,7 +44,7 @@ export async function applyTransition(input: ApplyTransitionInput) {
     eventType: "card.moved",
     actorType: input.actorType,
     actorId: input.actorId ?? null,
-    payload: { from: fromState, to: input.toState },
+    payload: input.reason ? { from: fromState, to: input.toState, reason: input.reason } : { from: fromState, to: input.toState },
   });
 
   return updated;

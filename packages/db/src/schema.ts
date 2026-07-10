@@ -200,7 +200,9 @@ export const agentRuns = pgTable("agent_runs", {
   // analyzer). Lets the UI look up "the latest brain-build run for project
   // X" -- without this, that run is an orphaned row nothing can query by
   // project, and the frontend has no way to attach a live session view to it.
-  projectId: uuid("project_id").references(() => projects.id),
+  // Cascades like cardId above -- an agent run tied to a deleted project is
+  // meaningless data, not something a project delete should be blocked by.
+  projectId: uuid("project_id").references(() => projects.id, { onDelete: "cascade" }),
   agentRoleId: uuid("agent_role_id").references(() => agentRoles.id),
   worktreeId: uuid("worktree_id").references((): AnyPgColumn => worktrees.id),
   parentAgentRunId: uuid("parent_agent_run_id").references((): AnyPgColumn => agentRuns.id),

@@ -220,6 +220,12 @@ export const CardTransitionInputSchema = z.object({
   toState: z.enum(CARD_STATES),
   actorType: z.enum(["user", "agent", "automation"]).default("user"),
   actorId: uuid.optional(),
+  // Recorded on the card.moved event itself -- the *only* place a reason
+  // survives once the card leaves the state it explains (e.g. blockedReason
+  // is derived live from current gate/agent-run rows, so it's gone the
+  // moment a card leaves "blocked"; this is what lets a later human still
+  // see why on the card's timeline).
+  reason: z.string().optional(),
 });
 export type CardTransitionInput = z.infer<typeof CardTransitionInputSchema>;
 

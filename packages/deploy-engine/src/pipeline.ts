@@ -62,7 +62,7 @@ export async function runDeployPipeline(cardId: string, provider: DeployProvider
     // implementer/reviewer/gates work is wrong here, only the deploy-time
     // repo resolution -- deploy_failed lets a retry skip straight back to
     // "deploying" once the repo is fixed, instead of forcing the full cycle.
-    await applyTransition({ cardId, toState: "deploy_failed", actorType: "automation" });
+    await applyTransition({ cardId, toState: "deploy_failed", actorType: "automation", reason });
     return { status: "deploy_failed" };
   }
   const git = simpleGit(repoRoot);
@@ -132,7 +132,12 @@ export async function runDeployPipeline(cardId: string, provider: DeployProvider
   }
 
   await recordDeployLiveGate(cardId, false, { deployFailure: result.detail, rollback: rollbackDetail });
-  await applyTransition({ cardId, toState: "deploy_failed", actorType: "automation" });
+  await applyTransition({
+    cardId,
+    toState: "deploy_failed",
+    actorType: "automation",
+    reason: `deploy failed: ${JSON.stringify(result.detail).slice(0, 300)}`,
+  });
   return { status: "deploy_failed" };
 }
 

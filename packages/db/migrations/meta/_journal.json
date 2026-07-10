@@ -64,6 +64,13 @@
       "when": 1783706218158,
       "tag": "0008_foamy_gertrude_yorkes",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1783708053072,
+      "tag": "0009_same_speed_demon",
+      "breakpoints": true
     }
   ]
 }

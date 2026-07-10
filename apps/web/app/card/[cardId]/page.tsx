@@ -105,12 +105,13 @@ export default function CardDetailPage({ params }: { params: Promise<{ cardId: s
       });
     }
     for (const event of card.events) {
-      const { from, to } = event.payload as { from?: string; to?: string };
+      const { from, to, reason } = event.payload as { from?: string; to?: string; reason?: string };
+      const transition = to ? `${String(from ?? "?")} → ${String(to)}` : "";
       rows.push({
         at: new Date(event.createdAt),
         kind: "event",
         label: event.eventType,
-        detail: to ? `${String(from ?? "?")} → ${String(to)}` : "",
+        detail: reason ? `${transition}${transition ? ": " : ""}${reason}` : transition,
       });
     }
 

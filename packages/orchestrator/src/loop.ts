@@ -97,7 +97,7 @@ export async function orchestrateCard(cardId: string, hooks: HookRegistry): Prom
       const reason = err instanceof InvalidRepoError ? err.message : `worktree setup failed: ${(err as Error).message}`;
       await applyTransition({ cardId, toState: "in_progress", actorType: "agent" });
       await recordRepoValidGate(cardId, false, { reason });
-      await applyTransition({ cardId, toState: "blocked", actorType: "agent" });
+      await applyTransition({ cardId, toState: "blocked", actorType: "agent", reason });
       await hooks.fire("onFailure", { cardId, reason: "worktree_setup_failed", detail: reason });
       return { status: "blocked", reason };
     }
@@ -155,7 +155,7 @@ export async function orchestrateCard(cardId: string, hooks: HookRegistry): Prom
           message: routedTo === "tech-manager" ? `Manager review needed: ${implResult.question}` : implResult.question,
         },
       });
-      await applyTransition({ cardId, toState: "blocked", actorType: "agent" });
+      await applyTransition({ cardId, toState: "blocked", actorType: "agent", reason: `waiting on answer: ${truncatedReason}` });
       return { status: "blocked", reason: `waiting on answer: ${truncatedReason}` };
     }
 
@@ -164,7 +164,8 @@ export async function orchestrateCard(cardId: string, hooks: HookRegistry): Prom
         priorFailureNote = distillFailureNote("implementer_error", implResult.resultText);
         continue; // retry in the same worktree, still in_progress
       }
-      await applyTransition({ cardId, toState: "blocked", actorType: "agent" });
+      const failReason = `implementer failed after ${MAX_ATTEMPTS} attempts: ${implResult.resultText.slice(0, 300)}`;
+      await applyTransition({ cardId, toState: "blocked", actorType: "agent", reason: failReason });
       await hooks.fire("onFailure", { cardId, reason: "implementer_failed", attempt });
       return { status: "blocked", reason: "implementer_failed" };
     }
@@ -192,12 +193,22 @@ export async function orchestrateCard(cardId: string, hooks: HookRegistry): Prom
 
     if (reviewResult.verdict === "fail") {
       if (attempt < MAX_ATTEMPTS) {
-        await applyTransition({ cardId, toState: "blocked", actorType: "agent" });
+        await applyTransition({
+          cardId,
+          toState: "blocked",
+          actorType: "agent",
+          reason: `review rejected (attempt ${attempt}/${MAX_ATTEMPTS}), retrying: ${reviewResult.resultText.slice(0, 300)}`,
+        });
         await applyTransition({ cardId, toState: "in_progress", actorType: "agent" });
         priorFailureNote = distillFailureNote("review_rejected", reviewResult.resultText);
         continue;
       }
-      await applyTransition({ cardId, toState: "blocked", actorType: "agent" });
+      await applyTransition({
+        cardId,
+        toState: "blocked",
+        actorType: "agent",
+        reason: `review rejected after ${MAX_ATTEMPTS} attempts: ${reviewResult.resultText.slice(0, 300)}`,
+      });
       await hooks.fire("onFailure", { cardId, reason: "review_rejected", attempt });
       return { status: "blocked", reason: "review_rejected" };
     }
@@ -208,7 +219,13 @@ export async function orchestrateCard(cardId: string, hooks: HookRegistry): Prom
     await hooks.fire("afterGateRun", { cardId, gate: "pipeline", passed: pipelineResult.allPassed, results: pipelineResult.results });
 
     if (!pipelineResult.allPassed) {
-      await applyTransition({ cardId, toState: "blocked", actorType: "agent" });
+      const failedGates = pipelineResult.results.filter((r) => r.blocking && r.outcome.status === "failed").map((r) => r.name);
+      await applyTransition({
+        cardId,
+        toState: "blocked",
+        actorType: "agent",
+        reason: `gate(s) failed: ${failedGates.join(", ")}`,
+      });
       await hooks.fire("onFailure", { cardId, reason: "gates_failed", results: pipelineResult.results });
       return { status: "blocked", reason: "gates_failed" };
     }
