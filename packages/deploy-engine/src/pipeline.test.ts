@@ -33,7 +33,7 @@ describe("runDeployPipeline (invalid project repo)", () => {
     await pool.end();
   });
 
-  it("lands the card in blocked with a repo_valid gate_results row instead of throwing, when the project's repo has no .git", async () => {
+  it("lands the card in deploy_failed with a repo_valid gate_results row instead of throwing, when the project's repo has no .git", async () => {
     const goneRepo = await mkdtemp(path.join(tmpdir(), "deploy-pipeline-invalid-repo-"));
     await rm(goneRepo, { recursive: true, force: true }); // registered once, deleted since (the scenario this test covers)
     cleanup.dirs.push(goneRepo);
@@ -63,10 +63,10 @@ describe("runDeployPipeline (invalid project repo)", () => {
     });
 
     const result = await runDeployPipeline(card.id, unreachableProvider);
-    expect(result).toEqual({ status: "blocked" });
+    expect(result).toEqual({ status: "deploy_failed" });
 
     const [cardAfter] = await db.select().from(cards).where(eq(cards.id, card.id));
-    expect(cardAfter?.state).toBe("blocked");
+    expect(cardAfter?.state).toBe("deploy_failed");
 
     const [gateDef] = await db.select().from(gateDefinitions).where(eq(gateDefinitions.key, "repo_valid"));
     expect(gateDef).toBeDefined();

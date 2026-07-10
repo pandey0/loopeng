@@ -156,6 +156,7 @@ export const api = {
     cardType?: string;
     riskTier?: string;
     priority?: number;
+    specDocId: string;
   }) => request<Card>("/cards", { method: "POST", body: JSON.stringify(input) }),
   transitionCard: (id: string, toState: CardState) =>
     request<Card>(`/cards/${id}/transition`, {

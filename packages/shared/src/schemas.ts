@@ -143,6 +143,12 @@ export const CardCreateInputSchema = z.object({
   tags: z.array(z.string()).default([]),
   acceptanceCriteria: z.array(z.string()).default([]),
   assigneeId: uuid.optional(),
+  // Every card eventually needs one to pass the docs_adr_linked gate (see
+  // packages/gates/src/checks/doc-linked.ts, which applies unconditionally
+  // to every card) -- mandated here instead so a missing spec doc is a
+  // rejected creation request, not a discovery made after implementer +
+  // reviewer + gates already burned a full cycle on the card.
+  specDocId: uuid,
 });
 export type CardCreateInput = z.infer<typeof CardCreateInputSchema>;
 

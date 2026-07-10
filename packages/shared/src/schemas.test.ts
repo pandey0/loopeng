@@ -40,8 +40,18 @@ describe("CardCreateInputSchema", () => {
       boardId: "22222222-2222-2222-2222-222222222222",
       title: "Some card",
       acceptanceCriteria: ["criterion 1"],
+      specDocId: "33333333-3333-3333-3333-333333333333",
     });
     expect(input.acceptanceCriteria).toEqual(["criterion 1"]);
+  });
+
+  it("rejects card creation with no spec doc linked", () => {
+    expect(() =>
+      CardCreateInputSchema.parse({
+        boardId: "22222222-2222-2222-2222-222222222222",
+        title: "Some card",
+      }),
+    ).toThrow();
   });
 });
 

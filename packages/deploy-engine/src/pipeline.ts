@@ -58,8 +58,12 @@ export async function runDeployPipeline(cardId: string, provider: DeployProvider
     // forever with no blockedReason.
     const reason = err instanceof InvalidRepoError ? err.message : `repo resolution failed: ${(err as Error).message}`;
     await recordRepoValidGate(cardId, false, { reason });
-    await applyTransition({ cardId, toState: "blocked", actorType: "automation" });
-    return { status: "blocked" };
+    // Same reasoning as every other failure below: nothing about the
+    // implementer/reviewer/gates work is wrong here, only the deploy-time
+    // repo resolution -- deploy_failed lets a retry skip straight back to
+    // "deploying" once the repo is fixed, instead of forcing the full cycle.
+    await applyTransition({ cardId, toState: "deploy_failed", actorType: "automation" });
+    return { status: "deploy_failed" };
   }
   const git = simpleGit(repoRoot);
   const baseBranch = (await git.revparse(["--abbrev-ref", "HEAD"])).trim();

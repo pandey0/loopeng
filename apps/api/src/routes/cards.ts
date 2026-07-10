@@ -38,8 +38,24 @@ export const cardRoutes: FastifyPluginAsync = async (fastify) => {
   });
 
   fastify.post("/cards", async (request, reply) => {
-    const input = CardCreateInputSchema.parse(request.body);
-    const [card] = await fastify.db.insert(cards).values(input).returning();
+    const { specDocId, ...cardInput } = CardCreateInputSchema.parse(request.body);
+
+    const [specDoc] = await fastify.db.select({ id: docs.id }).from(docs).where(eq(docs.id, specDocId));
+    if (!specDoc) {
+      reply.status(422).send({ error: "spec_doc_not_found", message: `no doc exists with id ${specDocId}` });
+      return;
+    }
+
+    // Insert card + spec link together so a card can never exist without the
+    // link that docs_adr_linked will require of it anyway -- no window where
+    // a half-created card sits linkless if the process dies between the two.
+    const card = await fastify.db.transaction(async (tx) => {
+      const [inserted] = await tx.insert(cards).values(cardInput).returning();
+      if (!inserted) throw new Error("card insert returned no row");
+      await tx.insert(cardDocLinks).values({ cardId: inserted.id, docId: specDocId, linkType: "spec" });
+      return inserted;
+    });
+
     reply.status(201).send(card);
   });
 
