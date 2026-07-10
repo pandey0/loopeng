@@ -10,6 +10,7 @@ import {
   DOC_STATUSES,
   DOC_TYPES,
   GATE_RESULT_STATUSES,
+  PROJECT_BRIEF_STATUSES,
   RISK_TIERS,
   USER_ROLES,
   WORKTREE_STATUSES,
@@ -94,14 +95,26 @@ export const ProjectSchema = z.object({
   id: uuid,
   name: z.string().min(1),
   repoPath: z.string().min(1),
+  // Set only when the project was onboarded via "clone from GitHub" rather
+  // than pointing at an already-local checkout -- kept for display (e.g.
+  // "cloned from ...") since repoPath alone can't be traced back to it.
+  repoUrl: z.string().nullable(),
+  briefDocId: uuid.nullable(),
+  briefStatus: z.enum(PROJECT_BRIEF_STATUSES).default("pending"),
   createdAt: isoDate,
 });
 export type Project = z.infer<typeof ProjectSchema>;
 
-export const ProjectCreateInputSchema = z.object({
-  name: z.string().min(1),
-  repoPath: z.string().min(1),
-});
+export const ProjectCreateInputSchema = z
+  .object({
+    name: z.string().min(1),
+    // Exactly one of these: a path already on disk, or a URL to clone fresh.
+    repoPath: z.string().min(1).optional(),
+    repoUrl: z.string().min(1).optional(),
+  })
+  .refine((v) => !!v.repoPath !== !!v.repoUrl, {
+    message: "provide exactly one of repoPath or repoUrl",
+  });
 export type ProjectCreateInput = z.infer<typeof ProjectCreateInputSchema>;
 
 export const BoardSchema = z.object({

@@ -64,6 +64,12 @@ async function main() {
         "Resolves a git rebase conflict inside a card's own worktree when its branch is synced onto the base branch before deploy, so trunk never sees an unresolved merge",
       capabilities: ["integration"],
     },
+    {
+      name: "analyzer",
+      description:
+        "Runs once, read-only, right after a project is registered — explores the repo and writes a project-brief doc (stack, architecture, key directories, conventions) that every later agent on that project gets as automatic context",
+      capabilities: ["analysis"],
+    },
   ]);
 
   await db.insert(gateDefinitions).values([

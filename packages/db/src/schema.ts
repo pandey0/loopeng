@@ -86,7 +86,17 @@ export const projects = pgTable("projects", {
   // Absolute local filesystem path to the target repo's root (must contain
   // .git -- validated at registration time and re-validated on every
   // dispatch, since the directory can be deleted/moved after registration).
+  // For a GitHub-cloned project this is the managed clone destination, not
+  // wherever the user's own checkout happens to live.
   repoPath: text("repo_path").notNull(),
+  // Set only when onboarded via "clone from GitHub" (POST /projects with
+  // repoUrl) -- null for a project registered against an already-local path.
+  repoUrl: text("repo_url"),
+  // The analyzer agent's output: a project-brief doc every later agent on
+  // this project's cards gets prepended to its spec-docs context, same as a
+  // linked spec doc. Null until the analyzer finishes (see briefStatus).
+  briefDocId: uuid("brief_doc_id").references(() => docs.id),
+  briefStatus: text("brief_status").notNull().default("pending"), // pending|analyzing|ready|failed
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 

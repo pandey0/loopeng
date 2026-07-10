@@ -52,6 +52,35 @@ function resolveWorktreesRoot(): string {
   return process.env.WORKTREES_PATH ?? path.join(resolveRepoRoot(), "data", "worktrees");
 }
 
+function resolveProjectReposRoot(): string {
+  return process.env.PROJECT_REPOS_PATH ?? path.join(resolveRepoRoot(), "data", "repos");
+}
+
+export class RepoCloneError extends Error {
+  constructor(repoUrl: string, cause: string) {
+    super(`failed to clone ${repoUrl}: ${cause}`);
+    this.name = "RepoCloneError";
+  }
+}
+
+// Called once, at project registration time, when onboarding via repoUrl
+// instead of an already-local repoPath ("clone from GitHub" in the UI).
+// Destination is namespaced under a managed directory (not wherever the
+// caller feels like) so a cloned project's worktrees/deploys resolve
+// exactly the same way a locally-registered one does downstream.
+export async function cloneProjectRepo(repoUrl: string, projectName: string): Promise<string> {
+  const destPath = path.join(resolveProjectReposRoot(), `${slugify(projectName)}-${Date.now().toString(36)}`);
+  try {
+    await simpleGit().clone(repoUrl, destPath);
+  } catch (err) {
+    throw new RepoCloneError(repoUrl, err instanceof Error ? err.message : String(err));
+  }
+  if (!isValidGitRepoRoot(destPath)) {
+    throw new RepoCloneError(repoUrl, "clone succeeded but no .git directory found at destination");
+  }
+  return destPath;
+}
+
 function slugify(input: string): string {
   return input
     .toLowerCase()

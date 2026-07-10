@@ -1,7 +1,9 @@
 import type { FastifyPluginAsync } from "fastify";
+import { eq } from "drizzle-orm";
 import { boards, projects } from "@loopeng/db";
 import { ProjectCreateInputSchema } from "@loopeng/shared";
-import { InvalidRepoError, isValidGitRepoRoot } from "@loopeng/worktree-manager";
+import { runProjectAnalyzerAgent } from "@loopeng/agents";
+import { cloneProjectRepo, InvalidRepoError, isValidGitRepoRoot, RepoCloneError } from "@loopeng/worktree-manager";
 
 export const projectRoutes: FastifyPluginAsync = async (fastify) => {
   fastify.get("/projects", async () => {
@@ -13,14 +15,42 @@ export const projectRoutes: FastifyPluginAsync = async (fastify) => {
   // error instead of silently stranding every card dispatched against it --
   // see resolveRepoRootForCard, which re-runs this same check on every
   // dispatch since the directory can go bad after registration too.
+  //
+  // Two onboarding paths, both land here: repoPath points at a repo already
+  // on disk; repoUrl clones one fresh into a managed directory first (see
+  // cloneProjectRepo). Either way, once repoPath resolves, registration
+  // fires the analyzer agent in the background -- it's not awaited, so the
+  // response comes back as soon as the project+board exist; the UI polls
+  // briefStatus (pending -> analyzing -> ready|failed) to know when the
+  // project's "brain" is ready.
   fastify.post("/projects", async (request, reply) => {
     const input = ProjectCreateInputSchema.parse(request.body);
-    if (!isValidGitRepoRoot(input.repoPath)) {
-      reply.status(400).send({ error: "invalid_repo", message: new InvalidRepoError(input.repoPath).message });
-      return;
+
+    let repoPath: string;
+    let repoUrl: string | null = null;
+    if (input.repoUrl) {
+      try {
+        repoPath = await cloneProjectRepo(input.repoUrl, input.name);
+      } catch (err) {
+        if (err instanceof RepoCloneError) {
+          reply.status(400).send({ error: "clone_failed", message: err.message });
+          return;
+        }
+        throw err;
+      }
+      repoUrl = input.repoUrl;
+    } else {
+      repoPath = input.repoPath!;
+      if (!isValidGitRepoRoot(repoPath)) {
+        reply.status(400).send({ error: "invalid_repo", message: new InvalidRepoError(repoPath).message });
+        return;
+      }
     }
 
-    const [project] = await fastify.db.insert(projects).values(input).returning();
+    const [project] = await fastify.db
+      .insert(projects)
+      .values({ name: input.name, repoPath, repoUrl, briefStatus: "analyzing" })
+      .returning();
     if (!project) throw new Error("failed to insert project row");
 
     // A project with no board to dispatch cards from is dead weight, so
@@ -32,6 +62,17 @@ export const projectRoutes: FastifyPluginAsync = async (fastify) => {
       .returning();
     if (!board) throw new Error("failed to insert board row");
 
+    void runProjectAnalyzerAgent({ id: project.id, name: project.name, repoPath: project.repoPath });
+
     reply.status(201).send({ project, board });
+  });
+
+  fastify.get<{ Params: { id: string } }>("/projects/:id", async (request, reply) => {
+    const [project] = await fastify.db.select().from(projects).where(eq(projects.id, request.params.id));
+    if (!project) {
+      reply.status(404).send({ error: "not_found" });
+      return;
+    }
+    return project;
   });
 };

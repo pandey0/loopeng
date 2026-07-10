@@ -398,3 +398,50 @@ export function buildIntegratorPrompt(card: Card, conflictedFiles: string[]): st
     "instead of guessing.",
   ].join("\n");
 }
+
+export interface ProjectAnalyzerContext {
+  name: string;
+  repoPath: string;
+}
+
+// Runs exactly once, right after a project is registered (local path or
+// freshly cloned) — this is the "brain" every later agent on that project's
+// cards gets automatically, the same way a linked spec doc does (see
+// loadProjectBrief in roles.ts, which prepends the resulting doc's
+// slug/summary to every implementer/reviewer/manager/designer/planner
+// prompt for this project). Read-only by construction (see the
+// disallowedTools list in runProjectAnalyzerAgent) — it runs directly
+// against the project's real repo root, not an isolated worktree, so it
+// must never be able to write anything.
+export function buildProjectAnalyzerPrompt(project: ProjectAnalyzerContext): string {
+  return [
+    "You are the analyzer agent on an internal dev-team platform. A repo was just registered as a new",
+    `project called "${project.name}", checked out at this exact directory (your cwd). Your one job is`,
+    "to read it and write a project brief that every other agent working on this project from now on",
+    "will get handed automatically, before it writes a single line of code or reviews a single diff.",
+    "",
+    "Explore the repo (README, package/build manifests, top-level directory layout, config files,",
+    "existing docs/ADRs if any, recent git log for a sense of what's active) and write a brief covering:",
+    "- **Purpose**: what this project is/does, in a couple sentences.",
+    "- **Stack**: languages, frameworks, package manager, runtime.",
+    "- **Architecture**: how the codebase is organized — key top-level directories/packages and what",
+    "  each owns. Call out any obvious monorepo/module boundaries.",
+    "- **Entry points**: where execution starts (main files, API routes, CLI entrypoints).",
+    "- **Conventions**: naming, testing, and code-style patterns you can actually observe in the code —",
+    "  not generic best practices. Only state what you can point to an example of.",
+    "- **How to build/test/run**: the actual commands (from package.json scripts, Makefiles, CI config,",
+    "  etc.), not guesses.",
+    "",
+    "Be concrete and specific to this repo. A future agent reads this brief instead of re-exploring the",
+    "whole codebase from scratch, so vague or generic statements are worse than useless — they'd be",
+    "actively misleading. If something is genuinely unclear from the code alone, say so rather than",
+    "inventing an answer.",
+    "",
+    "You are strictly read-only: do not create, edit, or delete any file, and do not run any command",
+    "that changes repo state (no git commits, no installs, no writes of any kind). Only read and",
+    "explore.",
+    "",
+    "Output nothing but the brief itself, in Markdown, starting directly with the Purpose section — no",
+    "preamble, no closing remarks.",
+  ].join("\n");
+}

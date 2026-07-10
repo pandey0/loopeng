@@ -29,8 +29,14 @@ export const PLANNER_CHILD_CARD_TYPES = ["feature", "bug", "chore", "spike"] as 
 export const RISK_TIERS = ["low", "medium", "high"] as const;
 export type RiskTier = (typeof RISK_TIERS)[number];
 
-export const DOC_TYPES = ["wiki", "adr", "rfc", "skill"] as const;
+export const DOC_TYPES = ["wiki", "adr", "rfc", "skill", "brief"] as const;
 export type DocType = (typeof DOC_TYPES)[number];
+
+// Lifecycle of a project's auto-generated brief doc (the analyzer agent's
+// output) -- separate from docs.status (draft/proposed/...) because a brief
+// isn't authored/reviewed like a wiki page, it's regenerated wholesale.
+export const PROJECT_BRIEF_STATUSES = ["pending", "analyzing", "ready", "failed"] as const;
+export type ProjectBriefStatus = (typeof PROJECT_BRIEF_STATUSES)[number];
 
 export const DOC_STATUSES = [
   "draft",

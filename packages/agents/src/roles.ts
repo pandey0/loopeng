@@ -1,6 +1,16 @@
 import { and, desc, eq } from "drizzle-orm";
 import { db } from "@loopeng/db";
-import { agentRoles, agentRuns, cardDependencies, cardDocLinks, cardQuestions, cards, docs as docsTable } from "@loopeng/db";
+import {
+  agentRoles,
+  agentRuns,
+  boards,
+  cardDependencies,
+  cardDocLinks,
+  cardQuestions,
+  cards,
+  docs as docsTable,
+  projects,
+} from "@loopeng/db";
 import { createDoc, listDocs } from "@loopeng/doc-engine";
 
 type Card = typeof cards.$inferSelect;
@@ -22,6 +32,7 @@ import {
   buildIntegratorPrompt,
   buildManagerPrompt,
   buildPlannerPrompt,
+  buildProjectAnalyzerPrompt,
   buildReviewerPrompt,
   type AnsweredQuestionContext,
   type ManagerChildCardContext,
@@ -91,6 +102,26 @@ async function loadLinkedSpecDocs(card: Card): Promise<SpecDocContext[]> {
   return linkedRows.map((row) => ({ slug: row.docs.slug, title: row.docs.title, summary: row.docs.summary }));
 }
 
+// The analyzer agent's project-brief doc, prepended ahead of a card's own
+// linked spec docs wherever this is called — it's the broadest context
+// (whole-repo), so it reads first. Only surfaces once briefStatus is
+// "ready": while analysis is still running (or failed), there's nothing
+// real to hand the agent, and a half-written brief would be worse than none.
+async function loadProjectBriefForBoard(boardId: string): Promise<SpecDocContext[]> {
+  const [row] = await db
+    .select({ doc: docsTable })
+    .from(boards)
+    .innerJoin(projects, eq(boards.projectId, projects.id))
+    .innerJoin(docsTable, eq(projects.briefDocId, docsTable.id))
+    .where(and(eq(boards.id, boardId), eq(projects.briefStatus, "ready")));
+  if (!row) return [];
+  return [{ slug: row.doc.slug, title: row.doc.title, summary: row.doc.summary }];
+}
+
+async function loadProjectBrief(card: Card): Promise<SpecDocContext[]> {
+  return loadProjectBriefForBoard(card.boardId);
+}
+
 // The planner has no card yet (it's what produces one), so there's nothing to
 // filter doc relevance by tags/links — it gets every existing RFC/ADR and
 // skill doc as slug + one-line summary instead, same lazy get_doc contract as
@@ -117,7 +148,7 @@ export async function runImplementerAgent(card: Card, priorFailureNote?: string)
 
   const roleId = await getRoleId("implementer");
   const skills = await loadRelevantSkills(card);
-  const specDocs = await loadLinkedSpecDocs(card);
+  const specDocs = [...(await loadProjectBrief(card)), ...(await loadLinkedSpecDocs(card))];
   const answeredQuestions = await loadAnsweredQuestions(card.id);
   const prompt = buildImplementerPrompt(card, skills, priorFailureNote, specDocs, answeredQuestions);
 
@@ -196,11 +227,15 @@ export interface PlannerRunHandle {
 export async function startPlannerAgent(boardId: string, requestText: string): Promise<PlannerRunHandle> {
   const roleId = await getRoleId("planner");
   const existingCards = await db.select({ title: cards.title }).from(cards).where(eq(cards.boardId, boardId));
-  const [specDocs, skills] = await Promise.all([loadAllSpecDocs(), loadAllSkillDocs()]);
+  const [projectBrief, allSpecDocs, skills] = await Promise.all([
+    loadProjectBriefForBoard(boardId),
+    loadAllSpecDocs(),
+    loadAllSkillDocs(),
+  ]);
   const prompt = buildPlannerPrompt(
     requestText,
     existingCards.map((c) => c.title),
-    specDocs,
+    [...projectBrief, ...allSpecDocs],
     skills,
   );
 
@@ -300,7 +335,7 @@ export async function runManagerAgent(epicCardId: string): Promise<ManagerRunRes
     acceptanceCriteria: card.acceptanceCriteria,
   }));
 
-  const specDocs = await loadLinkedSpecDocs(epicCard);
+  const specDocs = [...(await loadProjectBrief(epicCard)), ...(await loadLinkedSpecDocs(epicCard))];
   const prompt = buildManagerPrompt(epicCard, childCards, specDocs);
 
   const [run] = await db
@@ -360,7 +395,7 @@ export async function runReviewerAgent(card: Card): Promise<ReviewerRunResult> {
 
   const roleId = await getRoleId("reviewer");
   const diff = await getRepoDiff(worktree.fsPath, worktree.baseCommitSha);
-  const specDocs = await loadLinkedSpecDocs(card);
+  const specDocs = [...(await loadProjectBrief(card)), ...(await loadLinkedSpecDocs(card))];
   const prompt = buildReviewerPrompt(card, diff, specDocs);
 
   const [run] = await db
@@ -509,7 +544,7 @@ export async function runDesignerReviewAgent(card: Card): Promise<ReviewerRunRes
 
   const roleId = await getRoleId("designer");
   const diff = await getRepoDiff(worktree.fsPath, worktree.baseCommitSha);
-  const specDocs = await loadLinkedSpecDocs(card);
+  const specDocs = [...(await loadProjectBrief(card)), ...(await loadLinkedSpecDocs(card))];
   const prompt = buildDesignerReviewPrompt(card, diff, specDocs);
 
   const [run] = await db
@@ -597,4 +632,114 @@ export async function runIntegratorAgent(
     logsRef,
     question: question ?? undefined,
   };
+}
+
+export interface ProjectAnalyzerRunHandle {
+  agentRunId: string;
+  result: Promise<AgentRunResult>;
+}
+
+const analyzerDisallowedTools = ["Edit", "Write", "NotebookEdit"];
+
+// Kicked off once, fire-and-forget, right after POST /projects registers a
+// project (local path or fresh clone) — see apps/api/src/routes/projects.ts.
+// Split start/execute the same way the planner is: the caller gets an
+// agentRunId back immediately (so the UI can attach a live AgentSessionPanel
+// to it) without blocking the HTTP response on however long the CLI takes to
+// explore the repo. Runs directly against project.repoPath, not a worktree —
+// there's no card or branch here, just the target repo itself — so
+// analyzerDisallowedTools is what keeps this read-only; there is no
+// isolation layer to fall back on if that were wrong.
+export async function startProjectAnalyzerAgent(project: {
+  id: string;
+  name: string;
+  repoPath: string;
+}): Promise<ProjectAnalyzerRunHandle> {
+  const roleId = await getRoleId("analyzer");
+  const prompt = buildProjectAnalyzerPrompt({ name: project.name, repoPath: project.repoPath });
+
+  const [run] = await db
+    .insert(agentRuns)
+    .values({ agentRoleId: roleId, status: "running", startedAt: new Date() })
+    .returning();
+  if (!run) throw new Error("failed to insert agent_runs row");
+
+  return { agentRunId: run.id, result: executeProjectAnalyzerAgent(project, run.id, prompt) };
+}
+
+// Despite the prompt's "output nothing but the brief" instruction, a CLI
+// turn can still open with a stray aside from whatever it explored right
+// before writing the brief (observed once in practice: a one-line comment
+// about a lint script, unrelated to the brief itself, ahead of "# Purpose").
+// Cheaper and more robust to trim it here than to keep tightening the
+// prompt against a model behavior that can vary run to run.
+function stripPreamble(text: string): string {
+  const headingIndex = text.indexOf("# Purpose");
+  return headingIndex > 0 ? text.slice(headingIndex) : text;
+}
+
+async function executeProjectAnalyzerAgent(
+  project: { id: string; name: string; repoPath: string },
+  runId: string,
+  prompt: string,
+): Promise<AgentRunResult> {
+  const mcpConfig = buildSubAgentMcpConfig({
+    parentAgentRunId: runId,
+    cardId: null,
+    worktreeId: null,
+    cwd: project.repoPath,
+    depth: 1,
+    disallowedTools: analyzerDisallowedTools,
+  });
+  const result = await runClaudeCliStreamingOnce({
+    cwd: project.repoPath,
+    agentRunId: runId,
+    prompt,
+    permissionMode: "bypassPermissions",
+    disallowedTools: analyzerDisallowedTools,
+    mcpConfig,
+  });
+  const logsRef = await writeAgentLog(runId, result.raw);
+
+  if (result.isError || !result.resultText.trim()) {
+    await db.update(agentRuns).set({ status: "failed", logsRef, finishedAt: new Date() }).where(eq(agentRuns.id, runId));
+    await db.update(projects).set({ briefStatus: "failed" }).where(eq(projects.id, project.id));
+    return { agentRunId: runId, isError: true, resultText: result.resultText, costUsd: result.totalCostUsd, logsRef };
+  }
+
+  const slug = `project-brief-${project.id}`;
+  const doc = await createDoc({
+    slug,
+    title: `${project.name} — project brief`,
+    docType: "brief",
+    content: stripPreamble(result.resultText),
+    summary: `Auto-generated overview of ${project.name}'s stack, architecture, and conventions.`,
+    tags: ["project-brief"],
+    message: "analyzer agent: generate project brief",
+  });
+
+  await db
+    .update(agentRuns)
+    .set({ status: "succeeded", logsRef, finishedAt: new Date() })
+    .where(eq(agentRuns.id, runId));
+  await db.update(projects).set({ briefDocId: doc.id, briefStatus: "ready" }).where(eq(projects.id, project.id));
+
+  return { agentRunId: runId, isError: false, resultText: result.resultText, costUsd: result.totalCostUsd, logsRef };
+}
+
+// Convenience wrapper for callers (API route) that just want to fire this off
+// without holding the agentRunId — errors are swallowed into briefStatus
+// "failed" (already persisted by executeProjectAnalyzerAgent), not thrown,
+// since this always runs detached from an HTTP response.
+export async function runProjectAnalyzerAgent(project: { id: string; name: string; repoPath: string }): Promise<void> {
+  try {
+    await startProjectAnalyzerAgent(project).then((h) => h.result);
+  } catch (err) {
+    console.error(`[analyzer] project ${project.id} failed:`, err);
+    await db
+      .update(projects)
+      .set({ briefStatus: "failed" })
+      .where(eq(projects.id, project.id))
+      .catch(() => {});
+  }
 }

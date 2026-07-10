@@ -7,7 +7,7 @@ import { Button, buttonVariants, cn } from "@loopeng/ui";
 import type { DocStatus, DocType } from "@loopeng/shared";
 import { api } from "../../lib/api";
 
-const DOC_TYPES = ["wiki", "adr", "rfc", "skill"] as const;
+const DOC_TYPES = ["wiki", "adr", "rfc", "skill", "brief"] as const;
 
 // No dedicated "purple" design token exists (theme only defines
 // primary/success/warning/destructive/muted) -- adr gets a one-off accent
@@ -17,6 +17,7 @@ const DOC_TYPE_BADGE_CLASS: Record<DocType, string> = {
   rfc: "bg-warning/15 text-warning",
   skill: "bg-success/15 text-success",
   wiki: "bg-secondary text-muted-foreground",
+  brief: "bg-primary/15 text-primary",
 };
 
 // Status pills share the type pill's sizing but sit on a flat card

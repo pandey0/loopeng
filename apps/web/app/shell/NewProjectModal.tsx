@@ -1,8 +1,9 @@
 "use client";
 
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 import { useQueryClient } from "@tanstack/react-query";
-import { Button, Dialog, Input, Label } from "@loopeng/ui";
+import { Button, cn, Dialog, Input, Label } from "@loopeng/ui";
 import { api, ApiError } from "../../lib/api";
 import { useBoard } from "../providers/BoardProvider";
 
@@ -11,22 +12,37 @@ export interface NewProjectModalProps {
   onClose: () => void;
 }
 
+type Source = "local" | "clone";
+
 // Registering a project is a repo-path onboarding step, not a code-editing
 // one — so this stays a plain form + POST, no agent run / streaming panel
-// like IntakeModal. The path is validated server-side (see POST /projects)
-// so a typo or a not-yet-a-git-repo directory fails right here with a
-// specific message instead of leaving a card silently stuck later.
+// like IntakeModal. The path/URL is validated server-side (see POST
+// /projects) so a typo, a not-yet-a-git-repo directory, or an unreachable
+// clone URL fails right here with a specific message instead of leaving a
+// card silently stuck later. Either source ends the same way: as soon as
+// the project+board exist, the server kicks off the analyzer agent in the
+// background to build the project's brief — the "brain" every later agent
+// on this project gets handed automatically. That run isn't awaited here;
+// its progress shows up on /projects once this modal closes.
 export function NewProjectModal({ open, onClose }: NewProjectModalProps) {
   const queryClient = useQueryClient();
+  const router = useRouter();
   const { setBoardId } = useBoard();
+  const [source, setSource] = useState<Source>("local");
   const [name, setName] = useState("");
   const [repoPath, setRepoPath] = useState("");
+  const [repoUrl, setRepoUrl] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const sourceValue = source === "local" ? repoPath : repoUrl;
+  const canSubmit = !!name.trim() && !!sourceValue.trim() && !submitting;
+
   function reset() {
+    setSource("local");
     setName("");
     setRepoPath("");
+    setRepoUrl("");
     setSubmitting(false);
     setError(null);
   }
@@ -37,14 +53,22 @@ export function NewProjectModal({ open, onClose }: NewProjectModalProps) {
   }
 
   async function handleSubmit() {
-    if (!name.trim() || !repoPath.trim()) return;
+    if (!canSubmit) return;
     setSubmitting(true);
     setError(null);
     try {
-      const { board } = await api.createProject({ name: name.trim(), repoPath: repoPath.trim() });
-      await queryClient.invalidateQueries({ queryKey: ["boards"] });
+      const { board } = await api.createProject(
+        source === "local"
+          ? { name: name.trim(), repoPath: repoPath.trim() }
+          : { name: name.trim(), repoUrl: repoUrl.trim() },
+      );
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["boards"] }),
+        queryClient.invalidateQueries({ queryKey: ["projects"] }),
+      ]);
       setBoardId(board.id);
       handleClose();
+      router.push("/board");
     } catch (err) {
       setError(err instanceof ApiError ? err.message : (err as Error).message);
       setSubmitting(false);
@@ -69,15 +93,49 @@ export function NewProjectModal({ open, onClose }: NewProjectModalProps) {
             placeholder="e.g. Storefront API"
           />
         </div>
-        <div>
-          <Label htmlFor="project-repo-path">Repo path</Label>
-          <Input
-            id="project-repo-path"
-            value={repoPath}
-            onChange={(e) => setRepoPath(e.target.value)}
-            placeholder="/absolute/path/to/repo"
-          />
+
+        <div className="flex rounded-md border border-input bg-secondary/50 p-0.5 text-sm">
+          {(["local", "clone"] as const).map((s) => (
+            <button
+              key={s}
+              type="button"
+              onClick={() => setSource(s)}
+              className={cn(
+                "flex-1 rounded-[5px] py-1.5 font-medium transition-colors",
+                source === s ? "bg-card text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground",
+              )}
+            >
+              {s === "local" ? "Local path" : "Clone from GitHub"}
+            </button>
+          ))}
         </div>
+
+        {source === "local" ? (
+          <div>
+            <Label htmlFor="project-repo-path">Repo path</Label>
+            <Input
+              id="project-repo-path"
+              value={repoPath}
+              onChange={(e) => setRepoPath(e.target.value)}
+              placeholder="/absolute/path/to/repo"
+            />
+            <p className="mt-1 text-xs text-muted-foreground">A directory already on this machine, containing a .git folder.</p>
+          </div>
+        ) : (
+          <div>
+            <Label htmlFor="project-repo-url">Repository URL</Label>
+            <Input
+              id="project-repo-url"
+              value={repoUrl}
+              onChange={(e) => setRepoUrl(e.target.value)}
+              placeholder="https://github.com/org/repo.git"
+            />
+            <p className="mt-1 text-xs text-muted-foreground">
+              Cloned into a managed directory on the server before anything else runs.
+            </p>
+          </div>
+        )}
+
         {error && (
           <p className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
             {error}
@@ -87,8 +145,8 @@ export function NewProjectModal({ open, onClose }: NewProjectModalProps) {
           <Button variant="outline" onClick={handleClose}>
             Cancel
           </Button>
-          <Button onClick={handleSubmit} disabled={!name.trim() || !repoPath.trim() || submitting}>
-            {submitting ? "Registering…" : "Register project"}
+          <Button onClick={handleSubmit} disabled={!canSubmit}>
+            {submitting ? (source === "clone" ? "Cloning…" : "Registering…") : "Register project"}
           </Button>
         </div>
       </div>

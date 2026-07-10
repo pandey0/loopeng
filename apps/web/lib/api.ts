@@ -140,7 +140,8 @@ export const api = {
     request<Board>("/boards", { method: "POST", body: JSON.stringify(input) }),
 
   listProjects: () => request<Project[]>("/projects"),
-  createProject: (input: { name: string; repoPath: string }) =>
+  getProject: (id: string) => request<Project>(`/projects/${id}`),
+  createProject: (input: { name: string; repoPath?: string; repoUrl?: string }) =>
     request<{ project: Project; board: Board }>("/projects", { method: "POST", body: JSON.stringify(input) }),
   getConnections: () =>
     request<{ github: { connected: boolean; repo: string | null }; claude: { connected: boolean; version: string | null } }>(

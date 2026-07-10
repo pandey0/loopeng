@@ -4,6 +4,7 @@ import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
+import type { Project } from "@loopeng/shared";
 import { Button } from "@loopeng/ui";
 import { api } from "../../lib/api";
 import { useBoard } from "../providers/BoardProvider";
@@ -23,15 +24,49 @@ function formatCreatedAt(value: Date): string {
 // The Project Picker mockup this ports also shows fake per-project git
 // status ("clean" / "CI failing" / "3 ahead", merge-conflict counts, a
 // cloning progress bar, "opened 2h ago" live-session timestamps). None of
-// that exists on the real `Project` type (id, name, repoPath, createdAt --
-// see packages/shared/src/schemas.ts) or anywhere in the backend, so it's
-// omitted entirely rather than faked. Only real fields are rendered.
+// that exists anywhere in the backend, so it's omitted rather than faked.
+// briefStatus is real though (POST /projects kicks off the analyzer agent
+// in the background) -- polled below so "Building brain…" flips to "Brain
+// ready" without a manual refresh.
+function BriefBadge({ project }: { project: Project }) {
+  if (project.briefStatus === "ready") {
+    return (
+      <Link
+        href={`/docs/project-brief-${project.id}`}
+        className="shrink-0 rounded-full bg-success/15 px-2 py-0.5 text-[11px] font-medium text-success hover:underline"
+      >
+        🧠 Brain ready
+      </Link>
+    );
+  }
+  if (project.briefStatus === "failed") {
+    return (
+      <span className="shrink-0 rounded-full bg-destructive/15 px-2 py-0.5 text-[11px] font-medium text-destructive">
+        Brain analysis failed
+      </span>
+    );
+  }
+  return (
+    <span className="shrink-0 rounded-full bg-secondary px-2 py-0.5 text-[11px] font-medium text-muted-foreground">
+      Building brain…
+    </span>
+  );
+}
+
 export default function ProjectsPage() {
   const router = useRouter();
   const { setBoardId } = useBoard();
   const [newProjectOpen, setNewProjectOpen] = useState(false);
 
-  const projectsQuery = useQuery({ queryKey: ["projects"], queryFn: api.listProjects });
+  const projectsQuery = useQuery({
+    queryKey: ["projects"],
+    queryFn: api.listProjects,
+    refetchInterval: (query) => {
+      const data = query.state.data as Project[] | undefined;
+      const anyAnalyzing = data?.some((p) => p.briefStatus === "pending" || p.briefStatus === "analyzing");
+      return anyAnalyzing ? 3000 : false;
+    },
+  });
   const boardsQuery = useQuery({ queryKey: ["boards"], queryFn: api.listBoards });
 
   const projects = projectsQuery.data ?? [];
@@ -98,7 +133,12 @@ export default function ProjectsPage() {
                       created {formatCreatedAt(project.createdAt)}
                     </div>
                   </div>
-                  <div className="mt-1 truncate font-mono text-xs text-muted-foreground">{project.repoPath}</div>
+                  <div className="mt-1 flex items-center gap-2">
+                    <div className="truncate font-mono text-xs text-muted-foreground">
+                      {project.repoUrl ? `${project.repoUrl} → ${project.repoPath}` : project.repoPath}
+                    </div>
+                    <BriefBadge project={project} />
+                  </div>
                 </div>
               </div>
               <Button onClick={() => handleOpen(project.id)}>Open</Button>
