@@ -15,6 +15,21 @@ import { agentRuns, db } from "@loopeng/db";
 // it stays in the same process group -- signaling the *group* (negative pid)
 // reaches it even after the CLI's own PID has already exited and the job has
 // been reparented to init.
+// Every claude CLI child inherits this process's env by default (cwd/
+// DATABASE_URL/etc. all need to pass through) -- except ORCHESTRATOR_ENABLED,
+// which must never leak to a spawned child no matter what. An implementer's
+// Bash tool can itself spawn a worktree-local `apps/api` dev server (see the
+// module comment above on killProcessGroup, and the 2026-07-02 incident it
+// documents) -- if that grandchild process inherited ORCHESTRATOR_ENABLED=1
+// from this one, it would auto-start a second dispatcher racing the real
+// one, defeating the whole point of the flag being opt-in. Confirmed live:
+// exactly this leak happened once ORCHESTRATOR_ENABLED=1 was set on the real
+// instance's env for the first time.
+function agentSpawnEnv(): NodeJS.ProcessEnv {
+  const { ORCHESTRATOR_ENABLED: _dropped, ...rest } = process.env;
+  return rest;
+}
+
 export function killProcessGroup(pid: number, signal: NodeJS.Signals = "SIGTERM"): void {
   try {
     process.kill(-pid, signal);
@@ -68,7 +83,7 @@ export function runClaudeCli(input: RunClaudeCliInput): Promise<ClaudeCliResult>
   if (input.mcpConfig) args.push("--mcp-config", JSON.stringify(input.mcpConfig));
 
   return new Promise((resolve, reject) => {
-    const child = spawn("claude", args, { cwd: input.cwd, env: process.env, detached: true });
+    const child = spawn("claude", args, { cwd: input.cwd, env: agentSpawnEnv(), detached: true });
 
     let stdout = "";
     let stderr = "";
@@ -196,7 +211,7 @@ export function runClaudeCliStreaming(input: RunClaudeCliStreamingInput): Stream
   if (input.appendSystemPrompt) args.push("--append-system-prompt", input.appendSystemPrompt);
   if (input.mcpConfig) args.push("--mcp-config", JSON.stringify(input.mcpConfig));
 
-  const child = spawn("claude", args, { cwd: input.cwd, env: process.env, detached: true });
+  const child = spawn("claude", args, { cwd: input.cwd, env: agentSpawnEnv(), detached: true });
 
   const handlers = new Set<StreamEventHandler>();
   const appendTranscript = makeTranscriptAppender(input.agentRunId);
