@@ -2,18 +2,18 @@
 
 import { useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { Button, NotificationBell, type NotificationItem } from "@loopeng/ui";
 import { useNotifications } from "../providers/NotificationProvider";
 import { useBoard } from "../providers/BoardProvider";
 import { describeEvent } from "../../lib/events";
 import { BoardSwitcher } from "./BoardSwitcher";
-import { IntakeModal } from "./IntakeModal";
 import { NewProjectModal } from "./NewProjectModal";
 
 export function TopBar() {
+  const router = useRouter();
   const { events, unreadCount, markAllRead } = useNotifications();
   const { boardId } = useBoard();
-  const [intakeOpen, setIntakeOpen] = useState(false);
   const [newProjectOpen, setNewProjectOpen] = useState(false);
   // Local-only per the design's pause/resume-all-agents control -- there's no
   // backend concept of pausing every agent run, no API for it. Kept as a
@@ -49,7 +49,7 @@ export function TopBar() {
         <Button size="sm" variant="outline" onClick={() => setNewProjectOpen(true)}>
           New project
         </Button>
-        <Button size="sm" disabled={!boardId} onClick={() => setIntakeOpen(true)}>
+        <Button size="sm" disabled={!boardId} onClick={() => router.push("/plan")}>
           New
         </Button>
         <NotificationBell
@@ -67,7 +67,6 @@ export function TopBar() {
           }
         />
       </div>
-      {boardId && <IntakeModal boardId={boardId} open={intakeOpen} onClose={() => setIntakeOpen(false)} />}
       <NewProjectModal open={newProjectOpen} onClose={() => setNewProjectOpen(false)} />
     </header>
   );

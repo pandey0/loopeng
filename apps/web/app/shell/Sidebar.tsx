@@ -10,6 +10,7 @@ import { useBoard } from "../providers/BoardProvider";
 
 const NAV_ITEMS = [
   { href: "/board", label: "Board", icon: "🗂️" },
+  { href: "/plan", label: "Plan", icon: "💬" },
   { href: "/docs", label: "Docs", icon: "📄" },
   { href: "/activity", label: "Activity", icon: "📶" },
 ] as const;

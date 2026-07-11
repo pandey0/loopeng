@@ -68,18 +68,36 @@ export interface IntakeResult {
   epicCardId: string;
   cardIds: string[];
   specDocId: string;
-  managerAgentRunId: string;
+  managerAgentRunId?: string;
 }
 
 export interface IntakeStartResult {
   agentRunId: string;
 }
 
-// Poll target for a background planner run (see the intake route): "running"
-// until the CLI call + output parsing + board persistence finish, then a
-// terminal succeeded/failed outcome.
+export interface IntakeProposal {
+  specTitle: string;
+  cardCount: number;
+  cards: { title: string; cardType: string; riskTier: string }[];
+}
+
+export interface IntakeSessionSummary {
+  id: string;
+  status: string;
+  startedAt: string | null;
+  finishedAt: string | null;
+}
+
+// Poll target for a planning conversation (see the intake route): "running"
+// while the conversation is in progress (including while it's waiting on a
+// clarifying reply -- watch the live AgentSessionPanel for that, this only
+// tells you it's not finished yet), "awaiting_approval" once a proposal is
+// ready (nothing created on the board yet), then a terminal
+// succeeded/failed outcome. Every state is re-derived from the database on
+// each call -- a session survives an api restart or navigating away.
 export type IntakeStatus =
   | { status: "running" }
+  | { status: "awaiting_approval"; proposal: IntakeProposal }
   | { status: "succeeded"; result: IntakeResult }
   | { status: "failed"; error: string; code?: "planner_output_invalid" };
 
@@ -111,10 +129,12 @@ export class ApiError extends Error {
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(`${API_URL}${path}`, {
-    ...init,
-    headers: { "Content-Type": "application/json", ...init?.headers },
-  });
+  // Fastify's default JSON body parser rejects a request that declares
+  // Content-Type: application/json but sends no body at all ("Body cannot
+  // be empty...") -- a real bug this caught live: a body-less POST (e.g.
+  // approve/reanalyze, no payload needed) always set this header anyway.
+  const headers = init?.body ? { "Content-Type": "application/json", ...init?.headers } : init?.headers;
+  const res = await fetch(`${API_URL}${path}`, { ...init, headers });
   if (!res.ok) {
     const text = await res.text();
     let body: unknown = text;
@@ -155,8 +175,11 @@ export const api = {
     ),
   intake: (boardId: string, requestText: string) =>
     request<IntakeStartResult>(`/boards/${boardId}/intake`, { method: "POST", body: JSON.stringify({ requestText }) }),
+  listIntakeSessions: (boardId: string) => request<IntakeSessionSummary[]>(`/boards/${boardId}/intake`),
   getIntakeStatus: (boardId: string, agentRunId: string) =>
     request<IntakeStatus>(`/boards/${boardId}/intake/${agentRunId}`),
+  approveIntake: (boardId: string, agentRunId: string) =>
+    request<IntakeStatus>(`/boards/${boardId}/intake/${agentRunId}/approve`, { method: "POST" }),
 
   listCards: (boardId?: string) =>
     request<CardWithStatus[]>(`/cards${boardId ? `?boardId=${boardId}` : ""}`),

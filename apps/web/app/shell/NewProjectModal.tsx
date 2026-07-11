@@ -16,7 +16,7 @@ type Source = "local" | "clone";
 
 // Registering a project is a repo-path onboarding step, not a code-editing
 // one — so this stays a plain form + POST, no agent run / streaming panel
-// like IntakeModal. The path/URL is validated server-side (see POST
+// like /plan's intake flow. The path/URL is validated server-side (see POST
 // /projects) so a typo, a not-yet-a-git-repo directory, or an unreachable
 // clone URL fails right here with a specific message instead of leaving a
 // card silently stuck later. Either source ends the same way: as soon as
