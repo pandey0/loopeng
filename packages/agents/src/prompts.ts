@@ -179,6 +179,18 @@ export function buildPlannerPrompt(
     "Set riskTier per card based on blast radius (touches auth/billing/data-loss -> high;",
     "isolated/reversible -> low). Only add a dependsOn edge when a card genuinely cannot start",
     "before another finishes — over-linking serializes work that could run in parallel.",
+    "",
+    "## Before you decompose",
+    "This is a conversation, not a one-shot form: the product owner is available to answer",
+    "questions before you commit to a breakdown. If the request is genuinely ambiguous in a way",
+    "that would change what cards you'd propose (unclear scope, an unstated tradeoff, a missing",
+    "constraint only they can supply) — do not guess. End your turn with your question(s) in",
+    "plain prose, and nothing else: no markdown/json fence blocks yet. Their reply arrives as",
+    "your next turn in the same conversation; ask follow-ups the same way if you still need more.",
+    "Only emit the final ```markdown ...``` and ```json ...``` blocks once you're actually ready",
+    "to commit — that output is treated as final and immediately creates real cards on the board.",
+    "Don't ask questions you could reasonably answer yourself, and don't drag this out past what",
+    "the request actually needs — most requests are clear enough to decompose immediately.",
   ].join("\n");
 }
 

@@ -203,10 +203,16 @@ export const agentRuns = pgTable("agent_runs", {
   // Cascades like cardId above -- an agent run tied to a deleted project is
   // meaningless data, not something a project delete should be blocked by.
   projectId: uuid("project_id").references(() => projects.id, { onDelete: "cascade" }),
+  // Set only for planner runs (a planning conversation has no card yet --
+  // that's what it produces). Lets a board's planning history be listed and
+  // revisited: GET /boards/:id/intake queries agent_runs by boardId, and
+  // every session's transcript is already durable (agent_runs.transcript),
+  // so the conversation survives a page reload/navigation away.
+  boardId: uuid("board_id").references((): AnyPgColumn => boards.id, { onDelete: "cascade" }),
   agentRoleId: uuid("agent_role_id").references(() => agentRoles.id),
   worktreeId: uuid("worktree_id").references((): AnyPgColumn => worktrees.id),
   parentAgentRunId: uuid("parent_agent_run_id").references((): AnyPgColumn => agentRuns.id),
-  status: text("status").notNull().default("queued"), // queued|running|succeeded|failed|verifying
+  status: text("status").notNull().default("queued"), // queued|running|awaiting_approval|succeeded|failed|verifying
   verdict: text("verdict"), // pass | fail (sub-agent verification runs)
   logsRef: text("logs_ref"),
   // Incrementally-appended stream-json events for interactive sessions (card A+).

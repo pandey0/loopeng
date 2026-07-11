@@ -71,6 +71,13 @@
       "when": 1783708053072,
       "tag": "0009_same_speed_demon",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1783748142785,
+      "tag": "0010_moaning_mindworm",
+      "breakpoints": true
     }
   ]
 }

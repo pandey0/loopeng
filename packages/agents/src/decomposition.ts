@@ -39,14 +39,32 @@ export interface ParsedPlannerOutput {
 // parses/validates both deterministically rather than letting the model's
 // tool calls mutate the board directly.
 export function parsePlannerOutput(resultText: string): ParsedPlannerOutput {
-  const specMatch = resultText.match(/```markdown\s*\n([\s\S]*?)```/);
-  if (!specMatch) {
+  const markdownFenceStart = resultText.indexOf("```markdown");
+  if (markdownFenceStart === -1) {
     throw new PlannerOutputError("planner output missing a ```markdown spec doc block");
   }
 
-  const jsonMatch = resultText.match(/```json\s*\n([\s\S]*?)```/);
+  // The decomposition JSON block is always the *last* fenced block in the
+  // output (spec first, decomposition last, per DECOMPOSITION_OUTPUT_FORMAT)
+  // -- anchor on the last ```json fence, not the first. A spec that includes
+  // an example API response/payload as a ```json snippet inside its own body
+  // (a real, observed case -- a spec proposing a JSON export endpoint
+  // naturally wants to show the response shape) would otherwise make a
+  // first-match regex grab that inner example instead of the real
+  // decomposition, and/or truncate the spec body at the inner fence.
+  const jsonFenceMatches = [...resultText.matchAll(/```json\s*\n([\s\S]*?)\n```/g)];
+  const jsonMatch = jsonFenceMatches.at(-1);
   if (!jsonMatch) {
     throw new PlannerOutputError("planner output missing a ```json decomposition block");
+  }
+
+  const specBody = resultText
+    .slice(markdownFenceStart, jsonMatch.index)
+    .replace(/^```markdown\s*\n/, "")
+    .replace(/```\s*$/, "")
+    .trim();
+  if (!specBody) {
+    throw new PlannerOutputError("planner output's ```markdown spec doc block is empty");
   }
 
   let parsedJson: unknown;
@@ -82,7 +100,7 @@ export function parsePlannerOutput(resultText: string): ParsedPlannerOutput {
     throw new PlannerOutputError(`planner decomposition has a dependency cycle: ${cycle.join(" -> ")}`);
   }
 
-  return { specBody: specMatch[1]!.trim(), decomposition };
+  return { specBody, decomposition };
 }
 
 // Batch-local cycle check (DFS with a recursion stack) over the "dependsOn"

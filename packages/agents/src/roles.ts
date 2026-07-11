@@ -15,7 +15,7 @@ import { createDoc, listDocs } from "@loopeng/doc-engine";
 
 type Card = typeof cards.$inferSelect;
 import { getActiveWorktree, getRepoDiff, resolveRepoRoot } from "@loopeng/worktree-manager";
-import { runClaudeCliStreamingOnce } from "./claude-cli.js";
+import { runClaudeCliStreaming, runClaudeCliStreamingOnce, type StreamEvent } from "./claude-cli.js";
 import {
   parsePlannerOutput,
   persistDecomposition,
@@ -205,25 +205,40 @@ export async function runImplementerAgent(card: Card, priorFailureNote?: string)
 
 export interface PlannerRunResult extends AgentRunResult, PersistedDecomposition {}
 
-export interface PlannerRunHandle {
-  agentRunId: string;
-  /** Resolves/rejects once the CLI call, output parsing, and board persistence finish. */
-  result: Promise<PlannerRunResult>;
+// What a finished planning conversation actually produced -- a proposal, not
+// yet real cards. Lets the UI show "this will create N cards" (title, type,
+// risk tier per card) before the product owner commits to anything landing
+// on the board.
+export interface PlannerProposal {
+  specTitle: string;
+  cardCount: number;
+  cards: { title: string; cardType: string; riskTier: string }[];
 }
 
-// Turns a freeform product-owner request into a boarded epic + child cards.
-// Unlike the implementer/reviewer, the planner has no card or worktree yet —
-// it runs read-only against the main repo checkout (for codebase context)
-// and is never allowed to touch files; its entire output is the two fenced
-// blocks parsePlannerOutput expects. On success, the decomposition is
-// persisted with every card left in "backlog" — this is an intake tool, not
-// an auto-approval bypass, so a human reviews and moves cards to "ready"
-// themselves before dispatch.
+export interface PlannerConversationResult extends AgentRunResult {
+  proposal: PlannerProposal;
+}
+
+export interface PlannerRunHandle {
+  agentRunId: string;
+  /** Resolves/rejects once the conversation reaches a final, parseable proposal (or fails/times out) -- does NOT persist anything to the board. See approvePlannerPlan. */
+  result: Promise<PlannerConversationResult>;
+}
+
+// Turns a freeform product-owner request into a *proposed* epic + child card
+// breakdown -- a conversation, not a form. Unlike the implementer/reviewer,
+// the planner has no card or worktree yet — it runs read-only against the
+// main repo checkout (for codebase context) and is never allowed to touch
+// files. If the request is ambiguous, it can ask clarifying questions and
+// wait for a reply (see buildPlannerPrompt's "Before you decompose" section
+// and executePlannerAgent's turn loop) before committing to a breakdown.
+// Nothing lands on the board until approvePlannerPlan is called explicitly
+// — this is an intake tool, not an auto-approval bypass.
 //
 // Split into two halves so an HTTP caller can hand back agentRunId (and let
 // the frontend attach a live AgentSessionPanel) as soon as the agent_runs row
-// exists, instead of blocking the whole request on the CLI call + parsing +
-// persistence, which can take tens of seconds.
+// exists, instead of blocking the whole request on the CLI call, which can
+// take anywhere from tens of seconds to however long a back-and-forth runs.
 export async function startPlannerAgent(boardId: string, requestText: string): Promise<PlannerRunHandle> {
   const roleId = await getRoleId("planner");
   const existingCards = await db.select({ title: cards.title }).from(cards).where(eq(cards.boardId, boardId));
@@ -241,14 +256,87 @@ export async function startPlannerAgent(boardId: string, requestText: string): P
 
   const [run] = await db
     .insert(agentRuns)
-    .values({ agentRoleId: roleId, status: "running", startedAt: new Date() })
+    .values({ agentRoleId: roleId, boardId, status: "running", startedAt: new Date() })
     .returning();
   if (!run) throw new Error("failed to insert agent_runs row");
 
-  return { agentRunId: run.id, result: executePlannerAgent(boardId, run.id, prompt) };
+  return { agentRunId: run.id, result: executePlannerAgent(run.id, prompt) };
 }
 
-async function executePlannerAgent(boardId: string, runId: string, prompt: string): Promise<PlannerRunResult> {
+function buildPlannerProposal(parsed: ReturnType<typeof parsePlannerOutput>): PlannerProposal {
+  return {
+    specTitle: parsed.decomposition.epic.title,
+    cardCount: parsed.decomposition.cards.length,
+    cards: parsed.decomposition.cards.map((c) => ({ title: c.title, cardType: c.cardType, riskTier: c.riskTier })),
+  };
+}
+
+// Called once a planner conversation's agent_runs row is "awaiting_approval"
+// -- re-parses the same final turn's text (from the durably-persisted
+// transcript, not held in memory, so this works even across an api restart
+// between proposal and approval) and actually writes the epic + child cards
+// + spec doc, then runs the same one-time manager review intake always did.
+export async function approvePlannerPlan(agentRunId: string, boardId: string): Promise<PlannerRunResult> {
+  const [run] = await db.select().from(agentRuns).where(eq(agentRuns.id, agentRunId));
+  if (!run) throw new Error(`agent run not found: ${agentRunId}`);
+  if (run.status !== "awaiting_approval") {
+    throw new Error(`agent run ${agentRunId} is not awaiting approval (status=${run.status})`);
+  }
+
+  const transcript = (run.transcript as StreamEvent[] | undefined) ?? [];
+  const lastResult = [...transcript].reverse().find((e) => e.type === "result");
+  if (!lastResult) throw new PlannerOutputError(`agent run ${agentRunId} has no result event in its transcript`);
+  const { resultText } = extractResultEvent(lastResult);
+
+  const parsed = parsePlannerOutput(resultText);
+  const persisted = await persistDecomposition(boardId, parsed);
+
+  await db.update(agentRuns).set({ status: "succeeded", finishedAt: new Date() }).where(eq(agentRuns.id, agentRunId));
+
+  return { agentRunId, isError: false, resultText, logsRef: run.logsRef ?? "", ...persisted };
+}
+
+// A request that's clear enough finalizes in one turn, same as before. An
+// ambiguous one becomes a real conversation: the planner can end a turn with
+// a plain-prose question instead of the fenced decomposition blocks (see
+// buildPlannerPrompt's "Before you decompose" section), and the product
+// owner's reply is relayed into the *same* still-running CLI process via
+// StreamingSession.sendInput -- the existing card-C WebSocket input relay
+// (apps/api/src/routes/agent-run-socket.ts) already works unmodified here,
+// since it's keyed on agentRunId against the session registry generically,
+// with no planner-specific code of its own.
+//
+// "Is this turn a decomposition attempt?" is decided the cheap, unambiguous
+// way: does the output even contain a ```markdown fence at all? No fence at
+// all -> a clarifying message, keep the session open. A fence that fails to
+// parse (broken JSON, a dependency cycle, ...) is a real terminal failure,
+// same as the old one-shot behavior -- an attempted-but-broken decomposition
+// should surface as failed, not be silently retried forever.
+const PLANNER_MAX_TURNS = 8;
+const PLANNER_IDLE_TIMEOUT_MS = 15 * 60 * 1000;
+
+function extractResultEvent(event: StreamEvent): { resultText: string; isError: boolean; totalCostUsd?: number } {
+  return {
+    resultText: typeof event.result === "string" ? event.result : JSON.stringify(event),
+    isError: Boolean(event.is_error),
+    totalCostUsd: typeof event.total_cost_usd === "number" ? event.total_cost_usd : undefined,
+  };
+}
+
+// Scans a persisted agent_runs.transcript for the last turn's result text --
+// what a route handler needs to re-derive a proposal (or a failure message)
+// from durable storage instead of an in-memory value, so intake status
+// survives an api restart.
+export function extractResultEventForApi(transcript: unknown): string | null {
+  if (!Array.isArray(transcript)) return null;
+  for (let i = transcript.length - 1; i >= 0; i--) {
+    const event = transcript[i] as StreamEvent;
+    if (event?.type === "result") return extractResultEvent(event).resultText;
+  }
+  return null;
+}
+
+async function executePlannerAgent(runId: string, prompt: string): Promise<PlannerConversationResult> {
   const plannerDisallowedTools = ["Edit", "Write", "NotebookEdit", "Bash"];
   const mcpConfig = buildSubAgentMcpConfig({
     parentAgentRunId: runId,
@@ -258,7 +346,8 @@ async function executePlannerAgent(boardId: string, runId: string, prompt: strin
     depth: 1,
     disallowedTools: plannerDisallowedTools,
   });
-  const result = await runClaudeCliStreamingOnce({
+
+  const session = runClaudeCliStreaming({
     cwd: resolveRepoRoot(),
     agentRunId: runId,
     prompt,
@@ -266,39 +355,88 @@ async function executePlannerAgent(boardId: string, runId: string, prompt: strin
     disallowedTools: plannerDisallowedTools,
     mcpConfig,
   });
-  const logsRef = await writeAgentLog(runId, result.raw);
 
-  if (result.isError) {
-    await db.update(agentRuns).set({ status: "failed", logsRef, finishedAt: new Date() }).where(eq(agentRuns.id, runId));
-    throw new PlannerOutputError(`planner agent run failed: ${result.resultText.slice(0, 2000)}`);
-  }
+  return new Promise<PlannerConversationResult>((resolvePromise, rejectPromise) => {
+    let turns = 0;
+    let settled = false;
+    let idleTimer: ReturnType<typeof setTimeout>;
 
-  let persisted: PersistedDecomposition;
-  try {
-    const parsed = parsePlannerOutput(result.resultText);
-    persisted = await persistDecomposition(boardId, parsed);
-  } catch (err) {
-    await db.update(agentRuns).set({ status: "failed", logsRef, finishedAt: new Date() }).where(eq(agentRuns.id, runId));
-    throw err;
-  }
+    async function fail(reason: string) {
+      const logsRef = await writeAgentLog(runId, session.getTranscript());
+      await db.update(agentRuns).set({ status: "failed", logsRef, finishedAt: new Date() }).where(eq(agentRuns.id, runId));
+      rejectPromise(new PlannerOutputError(reason));
+    }
 
-  await db.update(agentRuns).set({ status: "succeeded", logsRef, finishedAt: new Date() }).where(eq(agentRuns.id, runId));
+    function settle(fn: () => void | Promise<void>) {
+      if (settled) return;
+      settled = true;
+      clearTimeout(idleTimer);
+      unsubscribe();
+      session.close();
+      void fn();
+    }
 
-  return {
-    agentRunId: runId,
-    isError: false,
-    resultText: result.resultText,
-    costUsd: result.totalCostUsd,
-    logsRef,
-    ...persisted,
-  };
+    function resetIdleTimer() {
+      clearTimeout(idleTimer);
+      idleTimer = setTimeout(() => settle(() => fail("planner conversation timed out waiting for a reply")), PLANNER_IDLE_TIMEOUT_MS);
+    }
+    resetIdleTimer();
+
+    const unsubscribe = session.onEvent((event) => {
+      if (event.type !== "result" || settled) return;
+      turns += 1;
+      const { resultText, isError, totalCostUsd } = extractResultEvent(event);
+
+      if (isError) {
+        settle(() => fail(`planner agent run failed: ${resultText.slice(0, 2000)}`));
+        return;
+      }
+
+      if (!/```markdown\s*\n/.test(resultText)) {
+        // Clarifying turn, not a decomposition attempt -- leave the session
+        // open for the product owner's reply.
+        if (turns >= PLANNER_MAX_TURNS) {
+          settle(() => fail(`planner asked too many clarifying questions without finalizing (max ${PLANNER_MAX_TURNS} turns)`));
+        } else {
+          resetIdleTimer();
+        }
+        return;
+      }
+
+      settle(async () => {
+        const logsRef = await writeAgentLog(runId, session.getTranscript());
+        let proposal: PlannerProposal;
+        try {
+          proposal = buildPlannerProposal(parsePlannerOutput(resultText));
+        } catch (err) {
+          await db.update(agentRuns).set({ status: "failed", logsRef, finishedAt: new Date() }).where(eq(agentRuns.id, runId));
+          rejectPromise(err instanceof Error ? err : new Error(String(err)));
+          return;
+        }
+        // Not persisted yet -- awaiting_approval means "a proposal is ready
+        // to review," not "cards exist." approvePlannerPlan re-parses this
+        // same transcript to actually create anything.
+        await db.update(agentRuns).set({ status: "awaiting_approval", logsRef, finishedAt: new Date() }).where(eq(agentRuns.id, runId));
+        resolvePromise({ agentRunId: runId, isError: false, resultText, costUsd: totalCostUsd, logsRef, proposal });
+      });
+    });
+
+    session.waitForExit().then(({ code, signal }) => {
+      settle(() => fail(`planner conversation ended unexpectedly (code=${code}, signal=${signal})`));
+    });
+  });
 }
 
-// Convenience wrapper kept for callers that want the old blocking behavior
-// (e.g. scripts, tests) — awaits the entire run instead of just kicking it off.
+// Convenience wrapper kept for callers that want the old blocking, no-review
+// behavior (e.g. scripts, tests) — awaits the whole conversation (there's no
+// human present to answer a clarifying question here, so a genuinely
+// ambiguous prompt will hit PLANNER_IDLE_TIMEOUT_MS and reject; write
+// unambiguous prompts for scripted use) and immediately approves the
+// resulting proposal, same as the old always-auto-persist behavior.
 export async function runPlannerAgent(boardId: string, requestText: string): Promise<PlannerRunResult> {
-  const { result } = await startPlannerAgent(boardId, requestText);
-  return result;
+  const { agentRunId, result } = await startPlannerAgent(boardId, requestText);
+  await result;
+  return approvePlannerPlan(agentRunId, boardId);
 }
 
 export interface ManagerRunResult extends AgentRunResult, PersistedManagerDecomposition {}

@@ -1,42 +1,51 @@
 import type { FastifyPluginAsync } from "fastify";
-import { eq } from "drizzle-orm";
-import { boards, eventLog } from "@loopeng/db";
-import { PlannerOutputError, runManagerAgent, startPlannerAgent, type PlannerRunResult } from "@loopeng/agents";
+import { and, desc, eq, sql } from "drizzle-orm";
+import { agentRoles, agentRuns, boards, eventLog } from "@loopeng/db";
+import {
+  approvePlannerPlan,
+  extractResultEventForApi,
+  parsePlannerOutput,
+  PlannerOutputError,
+  runManagerAgent,
+  startPlannerAgent,
+  type PlannerProposal,
+} from "@loopeng/agents";
 import { IntakeInputSchema } from "@loopeng/shared";
 
 export type IntakeStatusResponse =
   | { status: "running" }
+  | { status: "awaiting_approval"; proposal: PlannerProposal }
   | {
       status: "succeeded";
       result: { agentRunId: string; epicCardId: string; cardIds: string[]; specDocId: string; managerAgentRunId?: string };
     }
   | { status: "failed"; error: string; code?: "planner_output_invalid" };
 
-type IntakeOutcome =
-  | { status: "running" }
-  | { status: "succeeded"; result: PlannerRunResult & { managerAgentRunId?: string } }
-  | { status: "failed"; error: string; code?: "planner_output_invalid" };
-
-// Process-local map from agentRunId to how its background intake run ended,
-// mirroring the sessionRegistry pattern in claude-cli.ts (Phase 1 is a
-// single-node deployment, so in-memory is an acceptable substitute for a
-// persisted result store here too).
-const intakeOutcomes = new Map<string, IntakeOutcome>();
-
 // Replaces a human manually writing a spec doc + cards: a product owner
-// posts a freeform request, the planner agent drafts a spec doc and a
-// dependency-linked epic/feature/bug decomposition, and every leaf card
-// lands on the board in "backlog" state for a human to review before
-// moving it to "ready" — this is an intake tool, not an auto-approval
-// bypass.
-//
-// The planner CLI call + output parsing + board persistence can take tens of
-// seconds, so this responds as soon as the agent_runs row exists (202 with
-// just agentRunId) and continues the rest as a detached background task —
-// the frontend attaches AgentSessionPanel's live socket to that id instead of
-// blocking on a spinner, then polls GET .../intake/:agentRunId for the final
-// result once the run finishes.
+// describes a request in a conversation with the planner agent (it may ask
+// clarifying questions first -- see buildPlannerPrompt), and once it proposes
+// a breakdown, the product owner reviews it and explicitly approves before
+// anything real lands on the board. Nothing here is in-memory-only: every
+// planning session's transcript is durable (agent_runs.transcript), its
+// status is durable (agent_runs.status), and once approved, which cards it
+// produced is durable too (the card.intake_decomposed event below) -- a
+// session survives an api restart or the product owner navigating away and
+// coming back, by design (this used to be a process-local Map that lost
+// everything on restart).
 export const intakeRoutes: FastifyPluginAsync = async (fastify) => {
+  // Every past and current planning session for this board, most recent
+  // first -- the persisted "chat history" list.
+  fastify.get("/boards/:id/intake", async (request) => {
+    const { id: boardId } = request.params as { id: string };
+    const rows = await fastify.db
+      .select({ id: agentRuns.id, status: agentRuns.status, startedAt: agentRuns.startedAt, finishedAt: agentRuns.finishedAt })
+      .from(agentRuns)
+      .innerJoin(agentRoles, eq(agentRuns.agentRoleId, agentRoles.id))
+      .where(and(eq(agentRuns.boardId, boardId), eq(agentRoles.name, "planner")))
+      .orderBy(desc(agentRuns.startedAt));
+    return rows;
+  });
+
   fastify.post("/boards/:id/intake", async (request, reply) => {
     const { id: boardId } = request.params as { id: string };
     const input = IntakeInputSchema.parse({ ...(request.body as object), boardId });
@@ -48,78 +57,138 @@ export const intakeRoutes: FastifyPluginAsync = async (fastify) => {
     }
 
     const { agentRunId, result } = await startPlannerAgent(boardId, input.requestText);
-    intakeOutcomes.set(agentRunId, { status: "running" });
-
-    // Not awaited: the whole point is the HTTP response doesn't wait on this.
-    // Every branch below still records a terminal outcome, so a background
-    // failure surfaces through polling instead of becoming an unhandled
-    // rejection or a request that hangs forever.
-    result
-      .then(async (r) => {
-        await fastify.db.insert(eventLog).values({
-          entityType: "card",
-          entityId: r.epicCardId,
-          eventType: "card.intake_decomposed",
-          actorType: "agent",
-          actorId: input.requestedById ?? null,
-          payload: { agentRunId: r.agentRunId, cardIds: r.cardIds, specDocId: r.specDocId },
-        });
-
-        // Every fresh epic gets a one-time tech-manager review before its
-        // cards are left for a human to move to "ready" (spec:
-        // org-chart-manager-agent-role) — it may adjust the breakdown
-        // (split/merge/reprioritize), which is why the succeeded outcome's
-        // cardIds below can differ from the planner's original r.cardIds.
-        // A failure here doesn't invalidate the intake overall: the
-        // planner's cards already landed in backlog, so we still report
-        // success with the planner's original breakdown rather than losing
-        // that work over a supplementary review step erroring out.
-        try {
-          const managerResult = await runManagerAgent(r.epicCardId);
-          await fastify.db.insert(eventLog).values({
-            entityType: "card",
-            entityId: r.epicCardId,
-            eventType: "card.epic_reviewed",
-            actorType: "agent",
-            payload: { agentRunId: managerResult.agentRunId, cardIds: managerResult.cardIds, removedCardIds: managerResult.removedCardIds },
-          });
-          intakeOutcomes.set(agentRunId, {
-            status: "succeeded",
-            result: { ...r, cardIds: managerResult.cardIds, managerAgentRunId: managerResult.agentRunId },
-          });
-        } catch (managerErr) {
-          console.error("[intake] manager review failed, keeping planner's original decomposition", managerErr);
-          intakeOutcomes.set(agentRunId, { status: "succeeded", result: r });
-        }
-      })
-      .catch((err) => {
-        const code = err instanceof PlannerOutputError ? "planner_output_invalid" : undefined;
-        const message = err instanceof Error ? err.message : String(err);
-        intakeOutcomes.set(agentRunId, { status: "failed", error: message, code });
-      });
+    // Not awaited -- agentRuns.status is updated internally by
+    // executePlannerAgent as the conversation progresses/finishes, which is
+    // what GET .../intake/:agentRunId reads. This catch only exists so a
+    // background failure doesn't surface as an unhandled rejection; the
+    // failure itself is already recorded (status=failed) by the executor.
+    result.catch((err) => console.error(`[intake] planner run ${agentRunId} ended in error:`, err));
 
     reply.status(202).send({ agentRunId });
   });
 
   fastify.get("/boards/:id/intake/:agentRunId", async (request, reply) => {
     const { agentRunId } = request.params as { id: string; agentRunId: string };
-    const outcome = intakeOutcomes.get(agentRunId);
-    if (!outcome) {
+    const [run] = await fastify.db.select().from(agentRuns).where(eq(agentRuns.id, agentRunId));
+    if (!run) {
       reply.status(404).send({ error: "not_found" });
       return;
     }
 
-    if (outcome.status === "running") {
+    if (run.status === "running" || run.status === "queued") {
       reply.status(200).send({ status: "running" } satisfies IntakeStatusResponse);
       return;
     }
-    if (outcome.status === "succeeded") {
-      const { agentRunId: id, epicCardId, cardIds, specDocId, managerAgentRunId } = outcome.result;
-      reply
-        .status(200)
-        .send({ status: "succeeded", result: { agentRunId: id, epicCardId, cardIds, specDocId, managerAgentRunId } } satisfies IntakeStatusResponse);
+
+    if (run.status === "awaiting_approval") {
+      const lastResult = extractResultEventForApi(run.transcript);
+      if (!lastResult) {
+        reply.status(200).send({ status: "failed", error: "no proposal found in transcript" } satisfies IntakeStatusResponse);
+        return;
+      }
+      try {
+        const parsed = parsePlannerOutput(lastResult);
+        reply.status(200).send({
+          status: "awaiting_approval",
+          proposal: {
+            specTitle: parsed.decomposition.epic.title,
+            cardCount: parsed.decomposition.cards.length,
+            cards: parsed.decomposition.cards.map((c) => ({ title: c.title, cardType: c.cardType, riskTier: c.riskTier })),
+          },
+        } satisfies IntakeStatusResponse);
+      } catch (err) {
+        reply.status(200).send({
+          status: "failed",
+          error: err instanceof Error ? err.message : String(err),
+          code: "planner_output_invalid",
+        } satisfies IntakeStatusResponse);
+      }
       return;
     }
-    reply.status(200).send({ status: "failed", error: outcome.error, code: outcome.code } satisfies IntakeStatusResponse);
+
+    if (run.status === "succeeded") {
+      // Durable, not the in-memory map this used to be: the same event
+      // approvePlannerPlan's caller (POST .../approve below) already writes.
+      const [decomposedEvent] = await fastify.db
+        .select()
+        .from(eventLog)
+        .where(and(eq(eventLog.eventType, "card.intake_decomposed"), sql`${eventLog.payload}->>'agentRunId' = ${agentRunId}`))
+        .limit(1);
+      if (!decomposedEvent) {
+        reply.status(200).send({ status: "failed", error: "approved but no record of what was created" } satisfies IntakeStatusResponse);
+        return;
+      }
+      const payload = decomposedEvent.payload as { epicCardId: string; cardIds: string[]; specDocId: string };
+      const [reviewedEvent] = await fastify.db
+        .select()
+        .from(eventLog)
+        .where(and(eq(eventLog.eventType, "card.epic_reviewed"), eq(eventLog.entityId, payload.epicCardId)))
+        .orderBy(desc(eventLog.id))
+        .limit(1);
+      const reviewedPayload = reviewedEvent?.payload as { agentRunId: string; cardIds: string[] } | undefined;
+      reply.status(200).send({
+        status: "succeeded",
+        result: {
+          agentRunId,
+          epicCardId: payload.epicCardId,
+          cardIds: reviewedPayload?.cardIds ?? payload.cardIds,
+          specDocId: payload.specDocId,
+          managerAgentRunId: reviewedPayload?.agentRunId,
+        },
+      } satisfies IntakeStatusResponse);
+      return;
+    }
+
+    // failed
+    const lastResult = extractResultEventForApi(run.transcript);
+    reply.status(200).send({
+      status: "failed",
+      error: lastResult ? lastResult.slice(0, 2000) : "planner run failed",
+    } satisfies IntakeStatusResponse);
+  });
+
+  // The explicit human checkpoint: nothing from a planning conversation
+  // exists on the board until this is called. Persists the epic + child
+  // cards + spec doc (re-parsed from the same durable transcript the
+  // proposal came from, not held in memory), then kicks off the same
+  // one-time manager review intake always did -- not awaited, same reasoning
+  // as before: the response shouldn't block on a second agent run when the
+  // real cards already exist and are visible on the board immediately.
+  fastify.post("/boards/:id/intake/:agentRunId/approve", async (request, reply) => {
+    const { id: boardId, agentRunId } = request.params as { id: string; agentRunId: string };
+
+    let persisted: Awaited<ReturnType<typeof approvePlannerPlan>>;
+    try {
+      persisted = await approvePlannerPlan(agentRunId, boardId);
+    } catch (err) {
+      const code = err instanceof PlannerOutputError ? "planner_output_invalid" : undefined;
+      reply.status(400).send({ error: "approve_failed", message: err instanceof Error ? err.message : String(err), code });
+      return;
+    }
+
+    await fastify.db.insert(eventLog).values({
+      entityType: "card",
+      entityId: persisted.epicCardId,
+      eventType: "card.intake_decomposed",
+      actorType: "user",
+      payload: { agentRunId: persisted.agentRunId, epicCardId: persisted.epicCardId, cardIds: persisted.cardIds, specDocId: persisted.specDocId },
+    });
+
+    runManagerAgent(persisted.epicCardId)
+      .then(async (managerResult) => {
+        await fastify.db.insert(eventLog).values({
+          entityType: "card",
+          entityId: persisted.epicCardId,
+          eventType: "card.epic_reviewed",
+          actorType: "agent",
+          payload: { agentRunId: managerResult.agentRunId, cardIds: managerResult.cardIds, removedCardIds: managerResult.removedCardIds },
+        });
+      })
+      .catch((err) => console.error("[intake] manager review failed, keeping planner's original decomposition", err));
+
+    reply.status(200).send({
+      status: "succeeded",
+      result: { agentRunId: persisted.agentRunId, epicCardId: persisted.epicCardId, cardIds: persisted.cardIds, specDocId: persisted.specDocId },
+    } satisfies IntakeStatusResponse);
   });
 };

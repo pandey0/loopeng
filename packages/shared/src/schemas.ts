@@ -277,6 +277,7 @@ export type AgentRole = z.infer<typeof AgentRoleSchema>;
 export const AgentRunSchema = z.object({
   id: uuid,
   cardId: uuid.nullable(),
+  boardId: uuid.nullable(),
   agentRoleId: uuid.nullable(),
   worktreeId: uuid.nullable(),
   status: z.enum(AGENT_RUN_STATUSES).default("queued"),

@@ -65,6 +65,7 @@ export type GateResultStatus = (typeof GATE_RESULT_STATUSES)[number];
 export const AGENT_RUN_STATUSES = [
   "queued",
   "running",
+  "awaiting_approval",
   "succeeded",
   "failed",
   "verifying",

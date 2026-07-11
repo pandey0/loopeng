@@ -106,7 +106,7 @@ export function IntakeModal({ boardId, open, onClose }: IntakeModalProps) {
       open={open}
       onClose={handleClose}
       title="New request"
-      description="Describe what you need. A planner agent will draft a spec and decompose it into cards on this board."
+      description="Describe what you need. A planner agent will draft a spec and decompose it into cards — if anything's ambiguous, it'll ask before committing to a breakdown, and you can reply right in the panel below."
     >
       {phase === "form" || phase === "error" ? (
         <div>
@@ -135,7 +135,8 @@ export function IntakeModal({ boardId, open, onClose }: IntakeModalProps) {
       ) : phase === "running" ? (
         <div className="flex flex-col gap-3">
           <p className="text-sm text-muted-foreground">
-            Planner agent is decomposing this request into cards — this can take tens of seconds.
+            Planner agent is working on this. It may ask a clarifying question below before it commits to a
+            breakdown — reply in the box to keep going. Once it's confident, cards appear here automatically.
           </p>
           {agentRunId ? (
             <AgentSessionPanel agentRunId={agentRunId} roleName="planner" live />
