@@ -4,7 +4,6 @@ import { HierarchicalStrategy } from "./coordination/hierarchical.js";
 import type { CoordinationStrategy } from "./coordination/types.js";
 import { startCronTriggers } from "./triggers/cron-trigger.js";
 import { startEventTrigger } from "./triggers/event-trigger.js";
-import { reconcileOrphanedRuns } from "./reconcile.js";
 
 export * from "./hooks.js";
 export * from "./loop.js";
@@ -27,11 +26,10 @@ export interface Orchestrator {
 // "ready" — so the autonomous loop and human-driven board interleave
 // naturally instead of being two separate systems.
 export async function startOrchestrator(): Promise<Orchestrator> {
-  const reconciled = await reconcileOrphanedRuns();
-  if (reconciled > 0) {
-    console.warn(`[orchestrator] reconciled ${reconciled} card(s) orphaned by a prior process restart -> blocked`);
-  }
-
+  // Reconciliation itself now runs unconditionally in apps/api's plugin,
+  // ahead of the ORCHESTRATOR_ENABLED check -- see that plugin's comment for
+  // why. Left out of this function so it isn't skipped on a
+  // dispatch-disabled boot, and isn't run twice on a dispatch-enabled one.
   const hooks = new HookRegistry();
   const connectors = await loadConnectorRegistry();
 

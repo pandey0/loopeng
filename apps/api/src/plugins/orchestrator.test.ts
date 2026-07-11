@@ -2,9 +2,11 @@ import Fastify from "fastify";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const startOrchestrator = vi.fn();
+const reconcileOrphanedRuns = vi.fn().mockResolvedValue(0);
 
 vi.mock("@loopeng/orchestrator", () => ({
   startOrchestrator: (...args: unknown[]) => startOrchestrator(...args),
+  reconcileOrphanedRuns: (...args: unknown[]) => reconcileOrphanedRuns(...args),
 }));
 
 // Regression test for the 2026-07-02 incident: a worktree-local copy of
@@ -18,6 +20,8 @@ describe("orchestratorPlugin", () => {
 
   beforeEach(() => {
     startOrchestrator.mockReset();
+    reconcileOrphanedRuns.mockReset();
+    reconcileOrphanedRuns.mockResolvedValue(0);
   });
 
   afterEach(() => {
@@ -32,12 +36,17 @@ describe("orchestratorPlugin", () => {
     return fastify;
   }
 
-  it("never calls startOrchestrator when ORCHESTRATOR_ENABLED is unset (the default for a worktree-local process)", async () => {
+  it("never calls startOrchestrator when ORCHESTRATOR_ENABLED is unset (the default for a worktree-local process), but still reconciles orphaned runs", async () => {
     delete process.env.ORCHESTRATOR_ENABLED;
     const fastify = await buildApp();
     try {
       expect(startOrchestrator).not.toHaveBeenCalled();
       expect((fastify as unknown as { orchestrator?: unknown }).orchestrator).toBeUndefined();
+      // Regression: this sweep used to live *inside* startOrchestrator, so a
+      // dispatch-disabled boot (the exact case a repeatedly-restarted dev
+      // box hits) silently never ran it, orphaned-by-restart cards were
+      // never explained. It must run unconditionally.
+      expect(reconcileOrphanedRuns).toHaveBeenCalledTimes(1);
     } finally {
       await fastify.close();
     }
@@ -61,6 +70,7 @@ describe("orchestratorPlugin", () => {
     const fastify = await buildApp();
     try {
       expect(startOrchestrator).toHaveBeenCalledTimes(1);
+      expect(reconcileOrphanedRuns).toHaveBeenCalledTimes(1);
       expect((fastify as unknown as { orchestrator?: unknown }).orchestrator).toBeDefined();
     } finally {
       await fastify.close();

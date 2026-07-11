@@ -1,6 +1,6 @@
 import fp from "fastify-plugin";
 import type { FastifyPluginAsync } from "fastify";
-import { startOrchestrator, type Orchestrator } from "@loopeng/orchestrator";
+import { reconcileOrphanedRuns, startOrchestrator, type Orchestrator } from "@loopeng/orchestrator";
 
 declare module "fastify" {
   interface FastifyInstance {
@@ -21,6 +21,17 @@ declare module "fastify" {
 // default -- a worktree process would have to have ORCHESTRATOR_ENABLED=1
 // explicitly and deliberately set in its env for this to recur.
 export const orchestratorPlugin: FastifyPluginAsync = fp(async (fastify) => {
+  // Runs unconditionally, even on a worktree-local/dispatch-disabled boot:
+  // this is data hygiene ("that run died, the card lied about being
+  // in_progress"), not dispatch authority. Gating it behind
+  // ORCHESTRATOR_ENABLED too meant the one instance most likely to inherit
+  // an orphan from a *previous* run (a dev box being restarted repeatedly)
+  // was also the one instance where the sweep silently never ran.
+  const reconciled = await reconcileOrphanedRuns();
+  if (reconciled > 0) {
+    fastify.log.warn(`reconciled ${reconciled} card(s) orphaned by a prior process restart -> blocked`);
+  }
+
   if (process.env.ORCHESTRATOR_ENABLED !== "1") {
     fastify.log.warn("ORCHESTRATOR_ENABLED is not set to \"1\" -- cron/event dispatch triggers are not running");
     return;
