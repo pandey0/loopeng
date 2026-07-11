@@ -62,9 +62,14 @@ describe("deploy_failed recovery", () => {
 });
 
 describe("getNextState", () => {
-  it("walks the happy path for the normal case", () => {
+  it("walks the happy path forward one column at a time", () => {
     expect(getNextState("backlog")).toBe("ready");
+    expect(getNextState("ready")).toBe("in_progress");
     expect(getNextState("in_progress")).toBe("in_review");
+    expect(getNextState("in_review")).toBe("gate_checks");
+    expect(getNextState("gate_checks")).toBe("awaiting_approval");
+    expect(getNextState("awaiting_approval")).toBe("deploying");
+    expect(getNextState("deploying")).toBe("done");
   });
 
   // Regression: an earlier version derived this by walking a fixed
@@ -74,11 +79,8 @@ describe("getNextState", () => {
   // documented "retry just the deploy step" recovery path). Caught live by
   // an integrator agent rebasing two independent implementations of the
   // /advance endpoint.
-  it("routes blocked to ready, not to done", () => {
+  it("routes recovery states back onto the happy path, not into a dead end", () => {
     expect(getNextState("blocked")).toBe("ready");
-  });
-
-  it("routes deploy_failed to deploying (retry the deploy step), not to blocked", () => {
     expect(getNextState("deploy_failed")).toBe("deploying");
   });
 

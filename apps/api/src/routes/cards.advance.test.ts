@@ -61,25 +61,39 @@ describe("POST /cards/:id/advance", () => {
     expect(movedEvents.some((e) => e.eventType === "card.moved")).toBe(true);
   });
 
-  it("returns 409 (not a silent no-op) when the card is already in the terminal column", async () => {
+  it("routes in_review through gate_checks, matching the Phase 3 gate pipeline rather than skipping straight to done", async () => {
+    const cardId = await makeCard("advance route: in_review card", "in_review");
+
+    const response = await app.inject({ method: "POST", url: `/cards/${cardId}/advance` });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({ state: "gate_checks" });
+  });
+
+  it("returns 409 (not a silent no-op) when the card is already in a terminal state", async () => {
     const cardId = await makeCard("advance route: done card", "done");
 
     const response = await app.inject({ method: "POST", url: `/cards/${cardId}/advance` });
 
     expect(response.statusCode).toBe(409);
-    expect(response.json()).toMatchObject({ error: "terminal_column" });
+    expect(response.json()).toMatchObject({ error: "no_next_state" });
 
     const [card] = await db.select().from(cards).where(eq(cards.id, cardId));
     expect(card?.state).toBe("done");
   });
 
-  it("returns 409 when the array-adjacent next column isn't a legal transition (blocked)", async () => {
+  // Regression: advanceCard used to resolve the forward edge by walking a
+  // fixed column-order list, which sent blocked -> done (not a legal
+  // TRANSITIONS edge, so this returned 409 invalid_transition). It now
+  // resolves through NEXT_STATE (@loopeng/shared), which routes blocked to
+  // ready, so this succeeds.
+  it("resolves blocked's forward edge to ready, not the array-adjacent (and illegal) done", async () => {
     const cardId = await makeCard("advance route: blocked card", "blocked");
 
     const response = await app.inject({ method: "POST", url: `/cards/${cardId}/advance` });
 
-    expect(response.statusCode).toBe(409);
-    expect(response.json()).toMatchObject({ error: "invalid_transition" });
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({ state: "ready" });
   });
 
   it("returns 404 for an unknown card id", async () => {
