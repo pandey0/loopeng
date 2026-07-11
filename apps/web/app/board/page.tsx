@@ -4,7 +4,7 @@ import { Suspense, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Column, Button, isHumanBlocked } from "@loopeng/ui";
+import { Column, Button, isHumanBlocked, getStatusMeta } from "@loopeng/ui";
 import type { CardState, CardWithStatus } from "@loopeng/shared";
 import { api } from "../../lib/api";
 import { useBoard } from "../providers/BoardProvider";
@@ -26,17 +26,20 @@ const ACTIVE_RUN_POLL_MS = 4000;
 // routes by risk_tier: high stops at awaiting_approval for a human click,
 // low/medium auto-advance to deploying. deploying stays a dead-end column
 // until Phase 4 (deploy execution) lands.
-const PHASE_3_COLUMNS: { state: CardState; title: string }[] = [
-  { state: "backlog", title: "Backlog" },
-  { state: "ready", title: "Ready" },
-  { state: "in_progress", title: "In Progress" },
-  { state: "in_review", title: "In Review" },
-  { state: "gate_checks", title: "Gate Checks" },
-  { state: "awaiting_approval", title: "Awaiting Approval" },
-  { state: "deploying", title: "Deploying" },
-  { state: "deploy_failed", title: "Deploy Failed" },
-  { state: "blocked", title: "Blocked" },
-  { state: "done", title: "Done" },
+// Titles come from getStatusMeta (the same map the card detail page's
+// StatusBadge reads) so a column's label can't drift from what a card's
+// detail view shows for that same state.
+const PHASE_3_COLUMN_STATES: CardState[] = [
+  "backlog",
+  "ready",
+  "in_progress",
+  "in_review",
+  "gate_checks",
+  "awaiting_approval",
+  "deploying",
+  "deploy_failed",
+  "blocked",
+  "done",
 ];
 
 export default function BoardPage() {
@@ -66,7 +69,7 @@ function BoardPageInner() {
   });
 
   const cards = cardsQuery.data ?? [];
-  const flatCards = PHASE_3_COLUMNS.flatMap(({ state }) => cards.filter((c) => c.state === state));
+  const flatCards = PHASE_3_COLUMN_STATES.flatMap((state) => cards.filter((c) => c.state === state));
   const { focusedCardId, shortcutsOpen, closeShortcuts } = useBoardKeyboardShortcuts(flatCards, setApprovalCardId);
 
   useEffect(() => {
@@ -164,11 +167,11 @@ function BoardPageInner() {
         <StagePipelineBar cards={cards} />
         <div className="flex min-h-0 min-w-0 flex-1 gap-3 p-4">
           <div className="flex min-w-0 flex-1 gap-3 overflow-x-auto">
-            {PHASE_3_COLUMNS.map(({ state, title }) => (
+            {PHASE_3_COLUMN_STATES.map((state) => (
             <Column
               key={state}
               state={state}
-              title={title}
+              title={getStatusMeta(state).label}
               cards={byState(state)}
               onDropCard={handleDrop}
               onCardClick={(card) => router.push(`/card/${card.id}`)}
