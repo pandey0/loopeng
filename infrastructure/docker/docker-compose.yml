@@ -23,6 +23,11 @@ services:
       DATABASE_URL: postgresql://loopeng:loopeng@postgres:5432/loopeng
       WIKI_REPO_PATH: /data/wiki-repo
       API_PORT: 4000
+      # This is the one real instance -- the only place ORCHESTRATOR_ENABLED
+      # should be set. Agent worktrees running apps/api locally (e.g. `tsx
+      # watch` for manual UI verification) must never set this, or they'll
+      # start a second orchestrator racing this one over the same DATABASE_URL.
+      ORCHESTRATOR_ENABLED: "1"
     ports:
       - "${API_PORT:-4000}:4000"
     volumes:

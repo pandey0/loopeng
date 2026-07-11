@@ -1,7 +1,7 @@
 import fp from "fastify-plugin";
 import type { FastifyError, FastifyPluginAsync } from "fastify";
 import { ZodError } from "zod";
-import { InvalidTransitionError } from "@loopeng/board-engine";
+import { ConcurrentTransitionError, InvalidTransitionError } from "@loopeng/board-engine";
 
 export const errorHandlerPlugin: FastifyPluginAsync = fp(async (fastify) => {
   fastify.setErrorHandler((error: FastifyError, _request, reply) => {
@@ -11,6 +11,10 @@ export const errorHandlerPlugin: FastifyPluginAsync = fp(async (fastify) => {
     }
     if (error instanceof InvalidTransitionError) {
       reply.status(409).send({ error: "invalid_transition", message: error.message });
+      return;
+    }
+    if (error instanceof ConcurrentTransitionError) {
+      reply.status(409).send({ error: "concurrent_transition", message: error.message });
       return;
     }
     fastify.log.error(error);
