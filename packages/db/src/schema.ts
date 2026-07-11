@@ -270,7 +270,7 @@ export const deployRecords = pgTable("deploy_records", {
     .notNull()
     .references(() => cards.id, { onDelete: "cascade" }),
   environment: text("environment").notNull().default("production"),
-  status: text("status").notNull().default("pending"), // pending|deploying|live|rolled_back|failed
+  status: text("status").notNull().default("pending"), // pending|deploying|live|rolled_back|failed|crashed
   deployedCommitSha: text("deployed_commit_sha"),
   deployUrl: text("deploy_url"),
   monitoringDashboardUrl: text("monitoring_dashboard_url"),
