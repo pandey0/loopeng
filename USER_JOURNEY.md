@@ -2,9 +2,22 @@
 
 One continuous walkthrough, step by step: what you (the product owner) actually click/type, and exactly what fires in the codebase behind it. Paired with `USER_GUIDE.md` (day-to-day usage) and `ARCHITECTURE.md` (component reference) — this doc is the narrative that ties both together through a single real scenario.
 
-**Scenario**: a real incident — guest users hitting a 500 on checkout because a null email crashes the receipt-sender. You'll use this one scenario end to end.
+**Scenario**: a real incident — guest users hitting a 500 on checkout because a null email crashes the receipt-sender. You'll use this one scenario end to end, starting from before the project even exists on the platform.
 
 ---
+
+## Step 0 — Getting a project onto the platform
+
+**You do**: land on `/projects` (the platform's home — not a board; you haven't picked one yet, so the sidebar/board-switcher/pause-agents controls that only make sense *inside* a project are deliberately absent here). Click "+ Clone repository," pick **Local path** (a repo already on this machine) or **Clone from GitHub** (a URL), give it a name, submit.
+
+**Under the hood**:
+- `POST /projects` (`apps/api/src/routes/projects.ts`) validates the input against `ProjectCreateInputSchema` (exactly one of `repoPath`/`repoUrl`). For a GitHub URL, `cloneProjectRepo` (`@loopeng/worktree-manager`) runs a real `simple-git` clone into a managed directory under `data/repos/`; for a local path, it's validated in place (`isValidGitRepoRoot` — must actually contain `.git`).
+- A `projects` row is inserted (`briefStatus: "analyzing"`), and a `boards` row scoped to it in the same request — the project has a selectable board the instant the response comes back, no separate setup step.
+- The response returns immediately; you land on `/board` with the new board selected. You're not left waiting on what happens next.
+- In the background, `runProjectAnalyzerAgent` (`@loopeng/agents`) starts: a real, read-only `claude` CLI process explores the repo (README, manifests, directory layout, entry points, conventions, how to build/test/run) and writes a **project brief** — a `docType: "brief"` doc. This is the project's "brain": from now on, it's automatically prepended to every implementer/reviewer/manager/designer/planner prompt for this project's cards, the same way a linked spec doc is — every agent starts with real context about *this* codebase instead of exploring from scratch on every single card.
+- `/projects` shows the live status (`Building brain…` → `🧠 Brain ready`, polled every 3s) and a `↻ Re-analyze` control — the brief is a snapshot taken once at registration, not something that stays in sync with the repo as cards land, so re-running it on demand is the honest way to refresh it, not a promise it auto-updates.
+
+**Before agents can actually pick anything up**: `/settings` shows two real, workspace-wide connection checks — GitHub (`GITHUB_TOKEN`/`GITHUB_REPO`, only needed for the PR-comment features, not for the git operations themselves, which just use local `git`) and the Claude Code CLI (whether the api process can actually run `claude --version`). Both need to be green before promoting a card to `ready` does anything useful.
 
 ## Step 1 — You type the request
 
@@ -96,6 +109,8 @@ One continuous walkthrough, step by step: what you (the product owner) actually 
 ## The whole loop, compressed
 
 ```
+you register a project (local path or clone from GitHub) -> board created
+  -> analyzer builds a project brief in the background -> every later agent gets it as context
 you type a request
   -> planner (live-streamed) drafts spec + decomposition -> backlog
   -> manager reviews the epic's breakdown -> backlog (adjusted)

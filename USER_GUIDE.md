@@ -2,7 +2,15 @@
 
 This is the practical, end-to-end guide to using Loopeng — the self-hosted internal developer platform that combines a Confluence-style docs wiki, a Kanban dev-cycle board, and real AI coding agents that do the actual implementation work per card. Everything below reflects the real, currently-shipped behavior of the system (not aspirational design) and is written around realistic production scenarios rather than abstract feature lists.
 
-## 1. The mental model
+## 1. Getting started: onboarding a project
+
+Before there's a board to work on, there's a project. Land on `/projects` — the platform's home, deliberately shown without the board-scoped sidebar/top bar, since none of that (Board/Docs/Activity/Inbox, the board switcher) makes sense before you've picked one. Click "+ Clone repository": either point at a repo already on this machine (**Local path**) or give it a URL (**Clone from GitHub**, cloned server-side into a managed directory). Either way, the project and its board are created in the same request and you land on `/board` immediately.
+
+In the background, an **analyzer** agent — read-only, no card or worktree involved — explores the freshly-registered repo and writes a **project brief**: stack, architecture, entry points, conventions, how to build/test/run. `/projects` shows this building live (`Building brain…` → `🧠 Brain ready`, with a `↻ Re-analyze` to refresh it on demand — it's a snapshot, not something that tracks the repo automatically). From then on, every implementer/reviewer/manager/designer/planner run on that project's cards gets this brief prepended to its context automatically, the same way a linked spec doc does — agents start with real knowledge of your codebase instead of exploring from scratch every time.
+
+Before any card can actually get worked, check `/settings` — two real, workspace-wide checks: GitHub (`GITHUB_TOKEN`/`GITHUB_REPO`, only needed for PR-comment features; the actual git commits/merges agents make don't need it, they're plain local `git`) and the Claude Code CLI (whether the api server can run `claude` at all). Both need to be green.
+
+## 2. The mental model
 
 Forget "ticket tracker." Think of a **card** as a unit of work that an **AI agent will actually implement**, not just track. When you move a card to `ready`, a real `claude` CLI process starts working in an isolated git worktree — reading your codebase, writing code, running tests, committing — the same way a human engineer would, except headless and on your schedule.
 
@@ -10,9 +18,9 @@ The three pillars:
 
 - **Board** — Kanban columns representing the actual pipeline a change goes through: intake → implementation → review → automated gates → human approval → deploy.
 - **Docs** — a wiki (specs, ADRs, RFCs, skills) that agents read before working and write to as part of their output. This is how institutional knowledge accumulates instead of living only in Slack threads.
-- **Agents** — role-scoped `claude` CLI processes (planner, implementer, reviewer, and soon tech-manager, designer) that do the real work, live-streamed so you can watch them think.
+- **Agents** — role-scoped `claude` CLI processes (planner, implementer, reviewer, tech-manager, designer, integrator, analyzer, triager, doc-scanner) that do the real work, live-streamed so you can watch them think.
 
-## 2. The card lifecycle (the thing you'll see most)
+## 3. The card lifecycle (the thing you'll see most)
 
 ```
 backlog -> ready -> in_progress -> in_review -> gate_checks -> awaiting_approval -> deploying -> done
@@ -40,17 +48,19 @@ backlog -> ready -> in_progress -> in_review -> gate_checks -> awaiting_approval
 
 7. **Deploying → Done.** The deploy engine merges the card's branch into `main` (`git merge --no-ff`), rebuilds/redeploys, and the card lands in `done`. Production example from this very platform's own history: a merge only proceeds if the target branch is clean and matches the expected base — if someone's mid-merge-conflict or the working tree is dirty, the deploy fails loudly with a specific reason instead of silently corrupting `main`.
 
-8. **Blocked.** The escape hatch. A card lands here if: a gate fails, a reviewer fails it, an agent run crashes, or an agent raises a genuine `QUESTION:` that needs your judgment (see §5). A blocked card shows *why* right on the tile (e.g. "security_scan failed," or the open question text) — you don't have to dig through logs to find out. Click "Retry" to send it back to `ready` once the underlying issue (yours or the agent's) is resolved.
+8. **Blocked.** The escape hatch. A card lands here if: a gate fails, a reviewer fails it, an agent run crashes, or an agent raises a genuine `QUESTION:` that needs your judgment (see §6). A blocked card shows *why* right on the tile (e.g. "security_scan failed," or the open question text) — you don't have to dig through logs to find out. Click "Retry" to send it back to `ready` once the underlying issue (yours or the agent's) is resolved.
 
-## 3. The Kanban board, day to day
+## 4. The Kanban board, day to day
 
 - **Columns** map 1:1 to the lifecycle above: Backlog, Ready, In Progress, In Review, Gate Checks, Awaiting Approval, Deploying, Blocked, Done.
 - **Drag and drop** works for manual transitions where the state machine allows it (e.g. dragging `blocked` back to `ready`).
 - **Active-run visibility on the tile itself:** any card with a live agent shows a pulsing indicator, the role and status (e.g. "implementer running"), and — this is new — a live-updating one-line snippet of what it's actually doing right now (e.g. *"using Bash"* or a truncated excerpt of its current reasoning), plus a "watch" link that pops open the full live transcript without leaving the board. You no longer have to guess whether something died or is just slow.
 - **Activity feed** (sidebar + `/activity` page) is the structured event log: card moves, gate pass/fail, doc drift detections. Good for "what happened when," not for "what is the agent thinking" — use the live watch view for that.
 - **Dependency graph** (`/board/:id/graph`) visualizes `blocks`/`relates_to` relationships between cards — useful when an epic's child cards have real ordering constraints (e.g. "middleware" must land before "per-client config" can reference it).
+- **Inbox** (`/inbox`) is everything on the current board actually waiting on you, filtered down from the noise: cards `awaiting_approval`, cards blocked on an open `QUESTION:` to you, and cards blocked for any other reason. The sidebar's Inbox badge count is this same real computation, not a raw activity-event count — if the badge says 2, `/inbox` shows exactly those 2 things.
+- **Keyboard shortcuts** on the board: `j`/`k` move focus between cards, `a` opens the approval dialog for a focused `awaiting_approval` card, `?` shows the full list, `Escape` closes whatever's open.
 
-## 4. Watching agents work (real-time visibility)
+## 5. Watching agents work (real-time visibility)
 
 Every implementer/reviewer/planner run streams live: assistant reasoning text, every tool call (`Bash`, `Edit`, `Read`, ...) and its result, in a chat-style transcript. Two ways to reach it:
 
@@ -61,11 +71,11 @@ A **completed** run opens read-only (transcript playback, no input box). A **liv
 
 **Intake is live too now.** Submitting a new request no longer shows a bare "this can take tens of seconds" spinner — you watch the planner agent's actual decomposition reasoning stream in, the same chat-style view, ending in the same "created N cards" success screen.
 
-## 5. Card Questions: when an agent needs a real human call
+## 6. Card Questions: when an agent needs a real human call
 
 Agents don't guess on ambiguous product/business decisions. If an implementer or reviewer hits something genuinely outside its authority — e.g., *"the spec says 'rate limit per client' but doesn't say whether that's per API key or per IP — which one?"* — it ends its turn with a structured `QUESTION:` instead of failing or guessing. The card visibly pauses (not silently blocked-as-failure), the question shows up in the card's Activity tab with an answer box right there, and once you answer, the card auto-resumes with your answer injected into the next attempt's context — so the next run doesn't ask the same thing twice (up to the 5 most recent answered questions are carried forward).
 
-## 6. Docs: the wiki agents actually read and write
+## 7. Docs: the wiki agents actually read and write
 
 Four doc types, all git-versioned under the hood:
 
@@ -76,15 +86,15 @@ Four doc types, all git-versioned under the hood:
 
 Link a doc to a card via the card detail page's doc-links UI; agents automatically pull in tag-matched skill docs and any explicitly linked spec/ADR docs into their prompt context before they start working.
 
-## 7. Approving deploys like you mean it
+## 8. Approving deploys like you mean it
 
 The "Review & Approve" dialog (not a bare button) is the single most important habit to build: for every high-risk card, actually read the diff, actually skim the reviewer's real reasoning (not just the pass/fail badge), and actually check which gates ran and what they found. Production discipline example: a card marked `touchesArchitecture: true` that changes how sessions are authenticated should get the same scrutiny you'd give a human's PR touching auth — the platform surfaces everything you need for that in one place; it doesn't replace your judgment, it removes your excuse for not exercising it.
 
-## 8. Multi-agent org chart (where this is headed)
+## 9. Multi-agent org chart
 
-Today: `implementer`, `reviewer`, `planner`, `triager`, `doc-scanner`. Landing soon: `tech-manager` (reviews epic decompositions, becomes the escalation target for `QUESTION:`s raised on that epic's child cards) and `designer` (produces upstream UI/UX design specs before implementation on any user-facing feature, and does a downstream design-review pass afterward — same pattern as the code reviewer, but for UX consistency instead of code correctness).
+Nine roles, all live: `implementer`, `reviewer`, `planner`, `triager`, `doc-scanner`, `tech-manager` (reviews epic decompositions, is the escalation target for `QUESTION:`s raised on that epic's child cards), `designer` (upstream UI/UX design spec before implementation on user-facing cards, downstream design-review pass afterward — same pattern as the code reviewer, but for UX consistency instead of correctness), `integrator` (resolves a rebase conflict inside a card's own worktree when its branch is synced onto the base before deploy, so trunk never sees an unresolved merge), and `analyzer` (runs once per project, at registration — see §1's "project brief").
 
-## 9. Known rough edges (be aware, not alarmed)
+## 10. Known rough edges (be aware, not alarmed)
 
 - The API process runs natively (not containerized, by design — it needs live git/docker/claude-CLI access a container image doesn't have) while the web frontend runs in Docker. This means the API must be manually restarted after certain infra-level changes land — if the app behaves like it's ignoring recent changes, that's the first thing to check.
 - Agents occasionally create their own scaffolding/verification cards (e.g. "e2e: add a muted Badge variant") as part of self-testing their own work — these are internal test artifacts, not real product cards, and are a known, tracked pattern rather than a bug.
