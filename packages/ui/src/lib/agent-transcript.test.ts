@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { toChatItems } from "./agent-transcript";
+import { describeToolUse, toChatItems } from "./agent-transcript";
 
 describe("toChatItems", () => {
   it("renders assistant text blocks as assistant bubbles", () => {
@@ -81,5 +81,43 @@ describe("toChatItems", () => {
   it("tolerates events with no message payload", () => {
     expect(toChatItems({ type: "assistant" })).toEqual([]);
     expect(toChatItems({ type: "user", message: { content: "not-an-array" } })).toEqual([]);
+  });
+});
+
+describe("describeToolUse", () => {
+  it("describes a Read call by file path", () => {
+    expect(describeToolUse("Read", { file_path: "packages/orchestrator/src/loop.ts" })).toBe(
+      "📖 Reading packages/orchestrator/src/loop.ts",
+    );
+  });
+
+  it("describes a Bash call using its description when present, not the raw command", () => {
+    expect(describeToolUse("Bash", { command: "pnpm test", description: "Run the test suite" })).toBe("▶ Run the test suite");
+  });
+
+  it("falls back to a truncated raw command when Bash has no description", () => {
+    const longCommand = `echo ${"x".repeat(100)}`;
+    const result = describeToolUse("Bash", { command: longCommand });
+    expect(result.startsWith("▶ Running: echo ")).toBe(true);
+    expect(result.length).toBeLessThan(longCommand.length);
+  });
+
+  it("describes Grep with its pattern and path", () => {
+    expect(describeToolUse("Grep", { pattern: "ORCHESTRATOR_ENABLED", path: "apps/api" })).toBe(
+      '🔍 Searching for "ORCHESTRATOR_ENABLED" in apps/api',
+    );
+  });
+
+  it("humanizes an MCP tool name instead of showing the raw mcp__server__tool string", () => {
+    expect(describeToolUse("mcp__subagent__get_doc", { slug: "some-doc" })).toBe("🔌 get doc");
+  });
+
+  it("still produces a sentence, not raw JSON, for a completely unknown tool", () => {
+    expect(describeToolUse("SomeFutureTool", { whatever: true })).toBe("🔧 Using SomeFutureTool");
+  });
+
+  it("degrades gracefully when input is missing or not an object", () => {
+    expect(describeToolUse("Read", undefined)).toBe("📖 Reading a file");
+    expect(describeToolUse("Bash", "not-an-object")).toBe("▶ Running a command");
   });
 });

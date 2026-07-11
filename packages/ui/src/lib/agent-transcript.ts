@@ -75,3 +75,72 @@ export function toChatItems(event: TranscriptEvent): ChatItem[] {
 
   return [];
 }
+
+function truncate(text: string, max: number): string {
+  return text.length > max ? `${text.slice(0, max)}…` : text;
+}
+
+/**
+ * Turns a raw tool call into one plain-English line instead of a tool name +
+ * a JSON payload — "Reading packages/orchestrator/src/loop.ts" instead of
+ * `tool: Read` with an expandable `{ file_path: "..." }`. Covers the
+ * standard Claude Code CLI tool set plus a generic fallback for anything
+ * else (including MCP tools, named `mcp__<server>__<tool>`) so an unknown
+ * tool still reads as a sentence, not raw JSON.
+ */
+export function describeToolUse(name: string, input: unknown): string {
+  const obj = input && typeof input === "object" ? (input as Record<string, unknown>) : {};
+  const str = (key: string): string | undefined => (typeof obj[key] === "string" ? (obj[key] as string) : undefined);
+
+  switch (name) {
+    case "Read": {
+      const path = str("file_path");
+      return path ? `📖 Reading ${path}` : "📖 Reading a file";
+    }
+    case "Edit": {
+      const path = str("file_path");
+      return path ? `✏️ Editing ${path}` : "✏️ Editing a file";
+    }
+    case "Write": {
+      const path = str("file_path");
+      return path ? `📝 Writing ${path}` : "📝 Writing a file";
+    }
+    case "NotebookEdit": {
+      const path = str("notebook_path");
+      return path ? `📓 Editing notebook ${path}` : "📓 Editing a notebook";
+    }
+    case "Bash": {
+      const desc = str("description");
+      const command = str("command");
+      if (desc) return `▶ ${desc}`;
+      return command ? `▶ Running: ${truncate(command, 80)}` : "▶ Running a command";
+    }
+    case "Grep": {
+      const pattern = str("pattern");
+      const path = str("path");
+      return pattern ? `🔍 Searching for "${truncate(pattern, 60)}"${path ? ` in ${path}` : ""}` : "🔍 Searching the codebase";
+    }
+    case "Glob": {
+      const pattern = str("pattern");
+      return pattern ? `🔍 Finding files matching "${pattern}"` : "🔍 Finding files";
+    }
+    case "WebFetch": {
+      const url = str("url");
+      return url ? `🌐 Fetching ${url}` : "🌐 Fetching a page";
+    }
+    case "WebSearch": {
+      const query = str("query");
+      return query ? `🌐 Searching the web for "${query}"` : "🌐 Searching the web";
+    }
+    case "TodoWrite":
+      return "☑ Updating its task list";
+    case "Task":
+      return `🤝 Delegating: ${str("description") ?? "a sub-task"}`;
+    default:
+      if (name.startsWith("mcp__")) {
+        const short = name.split("__").pop() ?? name;
+        return `🔌 ${short.replace(/_/g, " ")}`;
+      }
+      return `🔧 Using ${name}`;
+  }
+}

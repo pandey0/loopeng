@@ -1,8 +1,13 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Badge, Button, Input, LiveIndicator, cn, toChatItems, type ChatItem, type TranscriptEvent } from "@loopeng/ui";
+import { Badge, Button, Input, LiveIndicator, cn, describeToolUse, toChatItems, type ChatItem, type TranscriptEvent } from "@loopeng/ui";
 import { api } from "../../../lib/api";
+
+// Remembered across sessions, not just this one panel -- once someone picks
+// "plain English" or "raw," every agent panel they open should open the
+// same way until they change it again.
+const PLAIN_ENGLISH_STORAGE_KEY = "loopeng:agent-panel-plain-english";
 
 function stringifyToolPayload(value: unknown): string {
   if (typeof value === "string") return value;
@@ -40,8 +45,26 @@ export function AgentSessionPanel({ agentRunId, roleName, live, heightClassName 
   const [items, setItems] = useState<ChatItem[]>([]);
   const [connectionState, setConnectionState] = useState<"connecting" | "open" | "closed" | "error">("connecting");
   const [draft, setDraft] = useState("");
+  // Defaults to plain English -- a raw tool_use payload ("tool: Read" +
+  // an expandable { file_path: "..." }) is exactly the kind of thing a
+  // product owner asked not to have to parse by default; toggling to
+  // raw is there for whoever actually wants the technical view.
+  const [plainEnglish, setPlainEnglish] = useState(true);
   const socketRef = useRef<WebSocket | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    const stored = window.localStorage.getItem(PLAIN_ENGLISH_STORAGE_KEY);
+    if (stored !== null) setPlainEnglish(stored === "1");
+  }, []);
+
+  function togglePlainEnglish() {
+    setPlainEnglish((prev) => {
+      const next = !prev;
+      window.localStorage.setItem(PLAIN_ENGLISH_STORAGE_KEY, next ? "1" : "0");
+      return next;
+    });
+  }
 
   useEffect(() => {
     const socket = new WebSocket(api.agentRunSocketUrl(agentRunId));
@@ -100,6 +123,14 @@ export function AgentSessionPanel({ agentRunId, roleName, live, heightClassName 
                 : "read-only playback"}
           </span>
         )}
+        <button
+          type="button"
+          onClick={togglePlainEnglish}
+          title={plainEnglish ? "Showing plain English — click for the raw tool calls" : "Showing raw tool calls — click for plain English"}
+          className="ml-auto rounded-md border border-input px-2 py-0.5 text-[11px] font-medium hover:bg-accent hover:text-accent-foreground"
+        >
+          {plainEnglish ? "Plain English" : "Raw"}
+        </button>
       </div>
 
       <div ref={scrollRef} className="flex-1 space-y-2 overflow-y-auto rounded-md border bg-background p-3">
@@ -123,12 +154,22 @@ export function AgentSessionPanel({ agentRunId, roleName, live, heightClassName 
                 </div>
               );
             case "tool_use":
-              return <CollapsibleEvent key={index} summary={`tool: ${item.name}`} payload={item.input} />;
+              return plainEnglish ? (
+                <div key={index} className="text-xs text-muted-foreground">
+                  {describeToolUse(item.name, item.input)}
+                </div>
+              ) : (
+                <CollapsibleEvent key={index} summary={`tool: ${item.name}`} payload={item.input} />
+              );
             case "tool_result":
+              // A successful result just confirms the line above worked --
+              // in plain English that's noise, not news. A failure is real
+              // information regardless of mode, so it always renders.
+              if (plainEnglish && !item.isError) return null;
               return (
                 <CollapsibleEvent
                   key={index}
-                  summary={item.isError ? "tool result (error)" : "tool result"}
+                  summary={item.isError ? (plainEnglish ? "✗ that didn't work" : "tool result (error)") : "tool result"}
                   payload={item.content}
                   isError={item.isError}
                 />
