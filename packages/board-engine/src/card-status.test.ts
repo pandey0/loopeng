@@ -2,7 +2,10 @@ import { describe, expect, it } from "vitest";
 import {
   buildActiveAgentRunMap,
   buildBlockedReasonMap,
+  buildDependencyInfoMap,
   type ActiveRunRow,
+  type DependencyEdgeRow,
+  type DependencyTargetRow,
   type FailingGateRow,
   type FailingRunRow,
   type OpenQuestionRow,
@@ -227,5 +230,69 @@ describe("buildActiveAgentRunMap", () => {
     const result = buildActiveAgentRunMap(rows, (id) => id === "run-live");
     expect(result.get("card-1")?.live).toBe(true);
     expect(result.get("card-2")?.live).toBe(false);
+  });
+});
+
+describe("buildDependencyInfoMap", () => {
+  it("returns an empty-but-present entry for every card id, even with no edges", () => {
+    const result = buildDependencyInfoMap(["card-1", "card-2"], [], []);
+    expect(result.get("card-1")).toEqual({ epicId: null, epicTitle: null, blockingCards: [] });
+    expect(result.get("card-2")).toEqual({ epicId: null, epicTitle: null, blockingCards: [] });
+  });
+
+  it("sets epicId/epicTitle from a relates_to edge", () => {
+    const edges: DependencyEdgeRow[] = [{ cardId: "child-1", dependsOnCardId: "epic-1", dependencyType: "relates_to" }];
+    const targets: DependencyTargetRow[] = [{ id: "epic-1", title: "Epic: rate limiting", state: "backlog" }];
+
+    const result = buildDependencyInfoMap(["child-1"], edges, targets);
+    expect(result.get("child-1")).toEqual({ epicId: "epic-1", epicTitle: "Epic: rate limiting", blockingCards: [] });
+  });
+
+  it("keeps the first relates_to edge if a card somehow has more than one", () => {
+    const edges: DependencyEdgeRow[] = [
+      { cardId: "child-1", dependsOnCardId: "epic-1", dependencyType: "relates_to" },
+      { cardId: "child-1", dependsOnCardId: "epic-2", dependencyType: "relates_to" },
+    ];
+    const targets: DependencyTargetRow[] = [
+      { id: "epic-1", title: "First epic", state: "backlog" },
+      { id: "epic-2", title: "Second epic", state: "backlog" },
+    ];
+
+    const result = buildDependencyInfoMap(["child-1"], edges, targets);
+    expect(result.get("child-1")?.epicId).toBe("epic-1");
+  });
+
+  it("includes a blocks target that isn't done yet", () => {
+    const edges: DependencyEdgeRow[] = [{ cardId: "card-1", dependsOnCardId: "blocker-1", dependencyType: "blocks" }];
+    const targets: DependencyTargetRow[] = [{ id: "blocker-1", title: "Middleware must land first", state: "in_progress" }];
+
+    const result = buildDependencyInfoMap(["card-1"], edges, targets);
+    expect(result.get("card-1")?.blockingCards).toEqual([{ id: "blocker-1", title: "Middleware must land first" }]);
+  });
+
+  it("excludes a blocks target once it's done -- the same condition isReady() checks at dispatch time", () => {
+    const edges: DependencyEdgeRow[] = [{ cardId: "card-1", dependsOnCardId: "blocker-1", dependencyType: "blocks" }];
+    const targets: DependencyTargetRow[] = [{ id: "blocker-1", title: "Middleware must land first", state: "done" }];
+
+    const result = buildDependencyInfoMap(["card-1"], edges, targets);
+    expect(result.get("card-1")?.blockingCards).toEqual([]);
+  });
+
+  it("handles a card that is both an epic child and blocked by a sibling", () => {
+    const edges: DependencyEdgeRow[] = [
+      { cardId: "card-2", dependsOnCardId: "epic-1", dependencyType: "relates_to" },
+      { cardId: "card-2", dependsOnCardId: "card-1", dependencyType: "blocks" },
+    ];
+    const targets: DependencyTargetRow[] = [
+      { id: "epic-1", title: "Epic: rate limiting", state: "backlog" },
+      { id: "card-1", title: "Add token-bucket middleware", state: "ready" },
+    ];
+
+    const result = buildDependencyInfoMap(["card-2"], edges, targets);
+    expect(result.get("card-2")).toEqual({
+      epicId: "epic-1",
+      epicTitle: "Epic: rate limiting",
+      blockingCards: [{ id: "card-1", title: "Add token-bucket middleware" }],
+    });
   });
 });

@@ -1,9 +1,9 @@
 import { and, desc, eq, inArray } from "drizzle-orm";
 import { db } from "@loopeng/db";
-import { agentRoles, agentRuns, cardQuestions, gateDefinitions, gateResults } from "@loopeng/db";
-import type { CardActiveRun, CardWithStatus } from "@loopeng/shared";
+import { agentRoles, agentRuns, cardDependencies, cardQuestions, cards, gateDefinitions, gateResults } from "@loopeng/db";
+import type { CardActiveRun, CardDependencyInfo, CardWithStatus } from "@loopeng/shared";
 
-export type { CardActiveRun, CardWithStatus };
+export type { CardActiveRun, CardDependencyInfo, CardWithStatus };
 
 const ACTIVE_STATUSES = ["running", "verifying"] as const;
 
@@ -239,11 +239,70 @@ async function computeActiveAgentRuns(
   return buildActiveAgentRunMap(rows, isRunLive, getSnippet);
 }
 
+export interface DependencyEdgeRow {
+  cardId: string;
+  dependsOnCardId: string;
+  dependencyType: string;
+}
+
+export interface DependencyTargetRow {
+  id: string;
+  title: string;
+  state: string;
+}
+
+// A card's epic (if any) is the *first* "relates_to" edge it has -- the
+// only current producer of relates_to edges is persistManagerDecomposition
+// (packages/agents/src/decomposition.ts), which always links a fresh child
+// card back to its epic exactly once, so "first" is unambiguous in
+// practice. blockingCards is every "blocks" dependency whose target isn't
+// state=done yet -- the same condition isReady() (dispatch-time) already
+// gates on, just surfaced here so the board can show it *before* someone
+// drags a card forward into a dependency it can't actually satisfy, instead
+// of the card just silently never getting picked up with no explanation.
+export function buildDependencyInfoMap(
+  cardIds: string[],
+  edges: DependencyEdgeRow[],
+  referencedCards: DependencyTargetRow[],
+): Map<string, CardDependencyInfo> {
+  const result = new Map<string, CardDependencyInfo>();
+  for (const id of cardIds) result.set(id, { epicId: null, epicTitle: null, blockingCards: [] });
+
+  const referencedById = new Map(referencedCards.map((c) => [c.id, c]));
+  for (const edge of edges) {
+    const info = result.get(edge.cardId);
+    const target = referencedById.get(edge.dependsOnCardId);
+    if (!info || !target) continue;
+    if (edge.dependencyType === "relates_to" && !info.epicId) {
+      info.epicId = target.id;
+      info.epicTitle = target.title;
+    } else if (edge.dependencyType === "blocks" && target.state !== "done") {
+      info.blockingCards.push({ id: target.id, title: target.title });
+    }
+  }
+  return result;
+}
+
+async function computeDependencyInfo(cardIds: string[]): Promise<Map<string, CardDependencyInfo>> {
+  if (cardIds.length === 0) return buildDependencyInfoMap(cardIds, [], []);
+
+  const edges = await db
+    .select({ cardId: cardDependencies.cardId, dependsOnCardId: cardDependencies.dependsOnCardId, dependencyType: cardDependencies.dependencyType })
+    .from(cardDependencies)
+    .where(inArray(cardDependencies.cardId, cardIds));
+  if (edges.length === 0) return buildDependencyInfoMap(cardIds, [], []);
+
+  const referencedIds = [...new Set(edges.map((e) => e.dependsOnCardId))];
+  const referenced = await db.select({ id: cards.id, title: cards.title, state: cards.state }).from(cards).where(inArray(cards.id, referencedIds));
+  return buildDependencyInfoMap(cardIds, edges, referenced);
+}
+
 /**
  * Enriches raw card rows with UI-facing status explainability: why a
- * blocked card is blocked, and whether an agent is actively working an
- * in-progress/in-review card. Both are derived from agent_runs/gate_results
- * rather than stored, so they're always computed fresh off the current data.
+ * blocked card is blocked, whether an agent is actively working an
+ * in-progress/in-review card, and its epic/unmet-dependency grouping info.
+ * All derived from agent_runs/gate_results/card_dependencies rather than
+ * stored, so they're always computed fresh off the current data.
  *
  * Generic over the row shape (rather than fixed to the `Card` zod type) so
  * it accepts drizzle's raw `cards` select rows directly — those type
@@ -253,7 +312,7 @@ async function computeActiveAgentRuns(
 export async function attachCardStatus<T extends { id: string; state: string }>(
   cardRows: T[],
   options?: { isRunLive?: IsRunLive; getSnippet?: GetRunSnippet },
-): Promise<(T & Pick<CardWithStatus, "blockedReason" | "activeAgentRun">)[]> {
+): Promise<(T & Pick<CardWithStatus, "blockedReason" | "activeAgentRun" | "dependencyInfo">)[]> {
   // deploy_failed shares the same "why is this stalled" lookup as blocked --
   // its most common cause is the deploy_live gate failing, already covered
   // by the failingGates query below.
@@ -264,14 +323,16 @@ export async function attachCardStatus<T extends { id: string; state: string }>(
     .filter((c) => c.state === "in_progress" || c.state === "in_review")
     .map((c) => c.id);
 
-  const [blockedReasons, activeRuns] = await Promise.all([
+  const [blockedReasons, activeRuns, dependencyInfo] = await Promise.all([
     computeBlockedReasons(blockedCardIds),
     computeActiveAgentRuns(activeCandidateIds, options?.isRunLive, options?.getSnippet),
+    computeDependencyInfo(cardRows.map((c) => c.id)),
   ]);
 
   return cardRows.map((card) => ({
     ...card,
     blockedReason: blockedReasons.get(card.id) ?? null,
     activeAgentRun: activeRuns.get(card.id) ?? null,
+    dependencyInfo: dependencyInfo.get(card.id) ?? { epicId: null, epicTitle: null, blockingCards: [] },
   }));
 }

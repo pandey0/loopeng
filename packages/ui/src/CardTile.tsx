@@ -73,6 +73,15 @@ export function CardTile({ card, draggable = true, highlighted = false, focused 
         {card.title}
       </div>
 
+      {card.dependencyInfo.blockingCards.length > 0 && (
+        <div
+          className="mb-1.5 rounded-md bg-warning/10 p-2 text-[11.5px] leading-snug text-warning"
+          title="Won't be picked up until its dependency finishes — dispatch checks this the same way"
+        >
+          🔗 waiting on: {card.dependencyInfo.blockingCards.map((b) => b.title).join(", ")}
+        </div>
+      )}
+
       {card.blockedReason && (
         <div
           className={cn(

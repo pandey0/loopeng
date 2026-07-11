@@ -101,6 +101,23 @@ function BoardPageInner() {
   const byState = (state: CardState) => cards.filter((c) => c.state === state);
 
   async function handleDrop(cardId: string, toState: CardState) {
+    // The state machine itself doesn't know about card_dependencies -- only
+    // isReady() (dispatch-time, packages/board-engine/src/dependency-graph.ts)
+    // checks unmet "blocks" edges, and only at the moment the orchestrator
+    // would pick a ready card up. Moving a card forward manually while it's
+    // still blocked is a legal transition that just silently never gets
+    // dispatched -- warn here, before the drop, instead of the card sitting
+    // there with no explanation (the same class of gap the board's other
+    // blockedReason surfacing exists to close).
+    const card = cards.find((c) => c.id === cardId);
+    if (card && toState !== "backlog" && toState !== "cancelled" && card.dependencyInfo.blockingCards.length > 0) {
+      const names = card.dependencyInfo.blockingCards.map((b) => b.title).join(", ");
+      const isAre = card.dependencyInfo.blockingCards.length === 1 ? "isn't" : "aren't";
+      const proceed = confirm(
+        `"${card.title}" depends on ${names}, which ${isAre} done yet.\n\nMoving it to "${toState}" won't get it auto-dispatched until that clears. Move it anyway?`,
+      );
+      if (!proceed) return;
+    }
     try {
       await api.transitionCard(cardId, toState);
       queryClient.invalidateQueries({ queryKey: ["cards", boardId] });

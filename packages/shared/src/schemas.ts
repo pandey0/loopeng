@@ -202,11 +202,20 @@ export interface CardActiveRun {
   snippet: string | null;
 }
 
+export interface CardDependencyInfo {
+  /** The epic this card was decomposed from (its first "relates_to" edge), null for an epic itself or a card with no epic. */
+  epicId: string | null;
+  epicTitle: string | null;
+  /** "blocks" dependencies whose target isn't done yet -- the same set isReady() (dispatch-time) checks, surfaced so the board can warn before a drag, not just silently never dispatch after one. */
+  blockingCards: { id: string; title: string }[];
+}
+
 export interface CardWithStatus extends Card {
   /** One-line reason a blocked card is blocked, e.g. "security_scan failed". Null if not blocked. */
   blockedReason: string | null;
   /** Set when an agent is actively working the card, so the tile can show a live indicator. */
   activeAgentRun: CardActiveRun | null;
+  dependencyInfo: CardDependencyInfo;
 }
 
 export const IntakeInputSchema = z.object({
