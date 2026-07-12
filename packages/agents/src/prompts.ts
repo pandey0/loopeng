@@ -53,6 +53,22 @@ const QUESTION_CONVENTION = [
   "your next dispatch. Only use this for genuine blockers, not to avoid making reasonable decisions.",
 ].join("\n");
 
+// Only the implementer gets this: it's the one role with tool access (via
+// the create_adr_doc MCP tool, packages/mcp-subagent/src/server.ts) that can
+// actually satisfy the adr_required gate (packages/gates/src/checks/adr-
+// required.ts). Without this, a card with touchesArchitecture=true had no
+// path to an accepted ADR short of a human hand-writing one through raw API
+// calls -- the gate could never pass through normal agent work.
+const ADR_DRAFT_INSTRUCTIONS = [
+  "## Architecture decision record required",
+  "This card touches architecture (touchesArchitecture=true). The adr_required gate will block it",
+  "from merging until an ADR doc is linked to this card with linkType=adr and status=accepted. As",
+  "part of your normal work, call the `create_adr_doc` MCP tool once to draft an ADR capturing the",
+  "architectural decision you're making (context, decision, consequences, alternatives considered)",
+  "and link it to this card. The tool creates the ADR at status=proposed, not accepted -- a human",
+  "reviews and accepts it afterwards via the docs UI, so do not try to set it to accepted yourself.",
+].join("\n");
+
 function formatAnsweredQuestionsBlock(answeredQuestions: AnsweredQuestionContext[]): string[] {
   if (answeredQuestions.length === 0) return [];
   return [
@@ -94,6 +110,7 @@ export function buildImplementerPrompt(
     "",
     GET_DOC_CONVENTION,
     ...formatAnsweredQuestionsBlock(answeredQuestions),
+    ...(card.touchesArchitecture ? ["", ADR_DRAFT_INSTRUCTIONS] : []),
     ...(priorFailureNote
       ? ["", "## Previous attempt feedback", "A prior attempt at this card was rejected. Address this before continuing:", priorFailureNote]
       : []),
