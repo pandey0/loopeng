@@ -6,7 +6,7 @@ import type { GateCheck, GateContext, GateOutcome } from "../types.js";
 
 export const adrRequiredGate: GateCheck = {
   key: "adr_required",
-  name: "ADR linked if architecture touched",
+  name: "ADR link (if architecture touched)",
 
   appliesTo(ctx: GateContext): boolean {
     return ctx.card.touchesArchitecture;

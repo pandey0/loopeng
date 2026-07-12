@@ -6,7 +6,7 @@ import type { GateCheck, GateContext, GateOutcome } from "../types.js";
 
 export const docLinkedGate: GateCheck = {
   key: "docs_adr_linked",
-  name: "Spec doc linked",
+  name: "Spec doc link",
 
   appliesTo(): boolean {
     return true;

@@ -39,7 +39,7 @@ async function auditDependencies(worktreePath: string): Promise<{ criticalCount:
 
 export const securityScanGate: GateCheck = {
   key: "security_scan",
-  name: "Security review cleared",
+  name: "Security scan",
 
   appliesTo(): boolean {
     return true;

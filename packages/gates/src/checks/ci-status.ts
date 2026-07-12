@@ -7,7 +7,7 @@ import type { GateCheck, GateContext, GateOutcome } from "../types.js";
 // wires Actions; a no-op elsewhere rather than fake-passing everyone.
 export const ciStatusGate: GateCheck = {
   key: "ci_status",
-  name: "CI checks green",
+  name: "CI checks",
 
   appliesTo(): boolean {
     return Boolean(process.env.GITHUB_TOKEN && process.env.GITHUB_REPO);

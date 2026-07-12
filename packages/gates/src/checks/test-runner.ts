@@ -18,7 +18,7 @@ async function hasTestScript(worktreePath: string): Promise<boolean> {
 
 export const testRunnerGate: GateCheck = {
   key: "tests_ci",
-  name: "Tests pass + CI green",
+  name: "Tests + CI",
 
   async appliesTo(ctx: GateContext): Promise<boolean> {
     return hasTestScript(ctx.worktreePath);

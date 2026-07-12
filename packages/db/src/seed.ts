@@ -72,16 +72,24 @@ async function main() {
     },
   ]);
 
+  // Names describe what each gate checks, not an outcome -- the UI renders
+  // this text next to a separate pass/fail StatusBadge, so a name phrased as
+  // an assertion of success ("Designer review passed") reads as a
+  // contradiction sitting right next to a red "failed" badge on the exact
+  // gate that failed. design_review is blocking: false because it's
+  // advisory-only in v1 (see orchestrator/loop.ts's recordDesignReviewGate
+  // call site) -- it never actually gates the card, so claiming blocking:
+  // true here was itself misleading independent of the name issue.
   await db.insert(gateDefinitions).values([
-    { key: "tests_ci", name: "Tests pass + CI green", blocking: true },
-    { key: "ci_status", name: "CI checks green", blocking: true },
-    { key: "security_scan", name: "Security review cleared", blocking: true },
-    { key: "docs_adr_linked", name: "Spec doc linked", blocking: true },
-    { key: "adr_required", name: "ADR linked if architecture touched", blocking: true },
-    { key: "peer_review", name: "Sub-agent peer review passed", blocking: true },
-    { key: "design_review", name: "Designer review passed", blocking: true },
-    { key: "deploy_live", name: "Deployed with monitoring wired", blocking: true },
-    { key: "repo_valid", name: "Target project repo resolves to a valid git repository", blocking: true },
+    { key: "tests_ci", name: "Tests + CI", blocking: true },
+    { key: "ci_status", name: "CI checks", blocking: true },
+    { key: "security_scan", name: "Security scan", blocking: true },
+    { key: "docs_adr_linked", name: "Spec doc link", blocking: true },
+    { key: "adr_required", name: "ADR link (if architecture touched)", blocking: true },
+    { key: "peer_review", name: "Peer review", blocking: true },
+    { key: "design_review", name: "Design review", blocking: false },
+    { key: "deploy_live", name: "Deploy + monitoring", blocking: true },
+    { key: "repo_valid", name: "Repo valid", blocking: true },
   ]);
 
   await db.insert(automations).values([
