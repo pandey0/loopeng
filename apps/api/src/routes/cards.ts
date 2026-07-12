@@ -134,6 +134,10 @@ export const cardRoutes: FastifyPluginAsync = async (fastify) => {
           status: gateResults.status,
           detail: gateResults.detail,
           createdAt: gateResults.createdAt,
+          // The exact agent run that produced this result -- lets the client
+          // link "this gate passed" straight to the real transcript that
+          // verified it, instead of a checkmark asking to be trusted blind.
+          runByAgentRunId: gateResults.runByAgentRunId,
         })
         .from(gateResults)
         .innerJoin(gateDefinitions, eq(gateResults.gateDefinitionId, gateDefinitions.id))

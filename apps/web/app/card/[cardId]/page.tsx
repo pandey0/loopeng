@@ -16,7 +16,7 @@ import {
   buildAgentRunTree,
   flattenAgentRunTree,
 } from "@loopeng/ui";
-import type { GateResultStatus, RiskTier } from "@loopeng/shared";
+import { matchCriterionVerdicts, parseCriterionVerdicts, type GateResultStatus, type RiskTier } from "@loopeng/shared";
 import { api, type CardDetailAgentRun } from "../../../lib/api";
 import { AgentSessionPanel } from "./AgentSessionPanel";
 
@@ -80,6 +80,30 @@ export default function CardDetailPage({ params }: { params: Promise<{ cardId: s
   useEffect(() => {
     if (detailQuery.data) setCriteria(detailQuery.data.acceptanceCriteria);
   }, [detailQuery.data]);
+
+  // The most recent peer_review gate result carries both the reviewer's
+  // per-criterion checklist (in its resultText, see buildReviewerPrompt)
+  // and, via runByAgentRunId, exactly which agent run produced it -- so a
+  // criterion's checkmark can point at the real transcript that verified
+  // it instead of asking to be trusted blind. A criterion the latest review
+  // never mentioned (added since, or no review has run yet) shows as not
+  // yet verified rather than defaulting to pass or fail.
+  const latestPeerReview = useMemo(() => {
+    const reviews = (detailQuery.data?.gateResults ?? []).filter((g) => g.key === "peer_review");
+    if (!reviews.length) return null;
+    return reviews.reduce((latest, g) => (new Date(g.createdAt) > new Date(latest.createdAt) ? g : latest));
+  }, [detailQuery.data]);
+
+  const criterionVerdicts = useMemo(() => {
+    const resultText = latestPeerReview && typeof latestPeerReview.detail?.resultText === "string" ? latestPeerReview.detail.resultText : "";
+    return matchCriterionVerdicts(criteria, parseCriterionVerdicts(resultText));
+  }, [latestPeerReview, criteria]);
+
+  const verifyingAgentRun = useMemo(() => {
+    const runId = latestPeerReview?.runByAgentRunId;
+    if (!runId) return null;
+    return (detailQuery.data?.agentRuns ?? []).find((r) => r.id === runId) ?? null;
+  }, [latestPeerReview, detailQuery.data]);
 
   const timeline = useMemo<TimelineRow[]>(() => {
     if (!detailQuery.data) return [];
@@ -188,26 +212,51 @@ export default function CardDetailPage({ params }: { params: Promise<{ cardId: s
         </div>
       )}
 
-      <h3 className={SECTION_LABEL_CLASS}>Acceptance criteria</h3>
-      <ul className="list-none space-y-1.5 p-0">
-        {criteria.map((criterion, index) => (
-          <li
-            key={index}
-            className="flex items-center gap-2.5 rounded-lg border border-border bg-card px-3 py-[9px] text-sm"
+      <h3 className={SECTION_LABEL_CLASS}>
+        Acceptance criteria
+        {verifyingAgentRun && (
+          <button
+            type="button"
+            onClick={() => setSessionRun(verifyingAgentRun)}
+            className="ml-2 normal-case tracking-normal text-primary hover:underline"
           >
-            <span className="text-success">✓</span>
-            <span className="flex-1">{criterion}</span>
-            <button
-              type="button"
-              disabled={saving}
-              onClick={() => removeCriterion(index)}
-              aria-label="Remove acceptance criterion"
-              className="text-muted-foreground hover:text-destructive disabled:opacity-50"
+            verified by reviewer run →
+          </button>
+        )}
+      </h3>
+      <ul className="list-none space-y-1.5 p-0">
+        {criteria.map((criterion, index) => {
+          const verdict = criterionVerdicts.find((v) => v.criterion === criterion)?.satisfied ?? null;
+          return (
+            <li
+              key={index}
+              className="flex items-center gap-2.5 rounded-lg border border-border bg-card px-3 py-[9px] text-sm"
             >
-              ✕
-            </button>
-          </li>
-        ))}
+              <span
+                className={cn(verdict === true ? "text-success" : verdict === false ? "text-destructive" : "text-muted-foreground")}
+                title={
+                  verdict === true
+                    ? "The latest reviewer run marked this SATISFIED"
+                    : verdict === false
+                      ? "The latest reviewer run marked this NOT SATISFIED"
+                      : "No reviewer run has verified this criterion yet"
+                }
+              >
+                {verdict === true ? "✓" : verdict === false ? "✗" : "—"}
+              </span>
+              <span className="flex-1">{criterion}</span>
+              <button
+                type="button"
+                disabled={saving}
+                onClick={() => removeCriterion(index)}
+                aria-label="Remove acceptance criterion"
+                className="text-muted-foreground hover:text-destructive disabled:opacity-50"
+              >
+                ✕
+              </button>
+            </li>
+          );
+        })}
       </ul>
       <div className="mb-6 mt-2 flex gap-2">
         <Input

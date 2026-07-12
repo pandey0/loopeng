@@ -28,6 +28,8 @@ export interface CardDetailGateResult {
   status: string;
   detail: Record<string, unknown>;
   createdAt: string;
+  /** The exact agent run that produced this gate result, e.g. the reviewer run behind a peer_review verdict. Null for gates that aren't agent-driven. */
+  runByAgentRunId: string | null;
 }
 
 export interface CardDetailEvent {
