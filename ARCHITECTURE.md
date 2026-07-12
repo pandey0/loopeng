@@ -56,6 +56,19 @@ Core entities, roughly grouped:
 - **event_log** -- append-only audit trail: entityType/entityId, eventType, actorType (user/agent/automation), payload -- everything the activity feed and SSE stream read from
 - **automations**/**automation_runs**/**connectors** -- cron/event/webhook trigger definitions and their run history (Phase 2+ groundwork)
 
+**`GET /projects/:id/export`** (`apps/api/src/routes/projects.ts`) -- read-only JSON snapshot of a project's cards (any `cardType`, epics included). 404s if the project doesn't exist. Response body:
+
+```
+{
+  schemaVersion: 1,
+  exportedAt: "<ISO timestamp>",
+  project: { id, name },
+  cards: [ { ...full cards row fields..., epicId: string | null }, ... ]
+}
+```
+
+`epicId` is derived the same way `GET /cards` derives it (first `relates_to` dependency edge), computed directly here rather than via `attachCardStatus` so the export doesn't also leak `activeAgentRun`/`blockedReason` activity data. No docs, comments, or activity are included -- just the cards table's own columns plus that one derived field. Bump `EXPORT_SCHEMA_VERSION` in the route file whenever the shape changes.
+
 ## 3. Card lifecycle (the state machine)
 
 Defined once in `packages/shared/src/state-machine.ts`, enforced by `board-engine`'s `applyTransition`:
