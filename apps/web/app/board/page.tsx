@@ -4,7 +4,7 @@ import { Suspense, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Column, Button, isHumanBlocked, getStatusMeta } from "@loopeng/ui";
+import { Column, Button, Input, isHumanBlocked, getStatusMeta } from "@loopeng/ui";
 import type { CardState, CardWithStatus } from "@loopeng/shared";
 import { api } from "../../lib/api";
 import { useBoard } from "../providers/BoardProvider";
@@ -172,22 +172,19 @@ function BoardPageInner() {
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">
         <StagePipelineBar cards={cards} />
         <div className="flex shrink-0 items-center gap-2 border-b border-border px-6 py-2">
-          <input
+          <Input
             ref={searchInputRef}
             type="text"
             value={titleQuery}
             onChange={(e) => setTitleQuery(e.target.value)}
             placeholder="Search cards by title… (press / to focus)"
-            className="w-72 rounded-md border border-border bg-card px-2.5 py-1 text-[13px] text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+            aria-label="Search cards by title"
+            className="h-8 w-72"
           />
           {titleQuery && (
-            <button
-              type="button"
-              onClick={() => setTitleQuery("")}
-              className="text-xs font-semibold text-muted-foreground hover:text-foreground"
-            >
+            <Button type="button" variant="ghost" size="sm" onClick={() => setTitleQuery("")}>
               Clear
-            </button>
+            </Button>
           )}
         </div>
         <div className="flex min-h-0 min-w-0 flex-1 gap-3 p-4">
