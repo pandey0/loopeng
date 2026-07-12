@@ -1,6 +1,7 @@
 import ReactMarkdown from "react-markdown";
 import type { DocStatus } from "@loopeng/shared";
 import { Badge } from "./components/badge";
+import { Button } from "./components/button";
 
 export interface DocVersionSummary {
   commitSha: string;
@@ -15,9 +16,21 @@ export interface DocViewerProps {
   body: string;
   versions?: DocVersionSummary[];
   linkedCards?: { id: string; title: string }[];
+  /** Called when the user clicks "Accept" on a status=proposed doc (e.g. an ADR) -- omit to hide the action entirely. */
+  onAccept?: () => void;
+  accepting?: boolean;
 }
 
-export function DocViewer({ title, status, tags, body, versions = [], linkedCards = [] }: DocViewerProps) {
+export function DocViewer({
+  title,
+  status,
+  tags,
+  body,
+  versions = [],
+  linkedCards = [],
+  onAccept,
+  accepting = false,
+}: DocViewerProps) {
   return (
     <div className="flex gap-6">
       <div className="max-w-[760px] flex-1">
@@ -27,6 +40,11 @@ export function DocViewer({ title, status, tags, body, versions = [], linkedCard
             {status}
           </Badge>
           {tags.length > 0 && <span>{tags.join(", ")}</span>}
+          {status === "proposed" && onAccept && (
+            <Button size="sm" variant="secondary" className="h-auto py-0.5" onClick={onAccept} disabled={accepting}>
+              {accepting ? "Accepting..." : "Accept"}
+            </Button>
+          )}
         </div>
         <div className="text-sm leading-relaxed [&_h1]:text-xl [&_h1]:font-bold [&_h2]:text-lg [&_h2]:font-semibold [&_p]:mb-3 [&_ul]:mb-3 [&_ul]:list-disc [&_ul]:pl-5 [&_code]:rounded [&_code]:bg-muted [&_code]:px-1 [&_code]:py-0.5 [&_code]:font-mono [&_code]:text-xs">
 

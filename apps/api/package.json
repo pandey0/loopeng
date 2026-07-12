@@ -17,6 +17,7 @@
     "@loopeng/board-engine": "workspace:*",
     "@loopeng/db": "workspace:*",
     "@loopeng/doc-engine": "workspace:*",
+    "@loopeng/gates": "workspace:*",
     "@loopeng/orchestrator": "workspace:*",
     "@loopeng/shared": "workspace:*",
     "@loopeng/worktree-manager": "workspace:*",

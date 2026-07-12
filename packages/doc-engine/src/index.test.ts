@@ -97,6 +97,46 @@ describe("mandatory doc summary (create/update)", () => {
     await db.delete(docs).where(eq(docs.id, doc.id));
   });
 
+  it("defaults a new doc's status to draft", async () => {
+    const slug = `test-doc-${randomUUID()}`;
+    const doc = await createDoc({
+      slug,
+      title: "Test Doc",
+      docType: "wiki",
+      content: "Body text.",
+      summary: "One-line summary.",
+      tags: [],
+      message: "create doc",
+    });
+
+    expect(doc.status).toBe("draft");
+
+    await db.delete(docs).where(eq(docs.id, doc.id));
+  });
+
+  it("honors an initial status override, both in the docs row and the frontmatter", async () => {
+    const slug = `test-doc-${randomUUID()}`;
+    const doc = await createDoc(
+      {
+        slug,
+        title: "Test ADR",
+        docType: "adr",
+        content: "## Context\nSome decision.",
+        summary: "One-line summary.",
+        tags: [],
+        message: "create doc",
+      },
+      { status: "proposed" },
+    );
+
+    expect(doc.status).toBe("proposed");
+
+    const full = await getDoc(slug);
+    expect(full?.frontmatter.status).toBe("proposed");
+
+    await db.delete(docs).where(eq(docs.id, doc.id));
+  });
+
   it("overrides the summary on update when a new one is provided", async () => {
     const slug = `test-doc-${randomUUID()}`;
     const doc = await createDoc({

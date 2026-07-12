@@ -2,14 +2,23 @@
 
 import { use } from "react";
 import Link from "next/link";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { DocViewer } from "@loopeng/ui";
 import { api } from "../../../lib/api";
 
 export default function DocDetailPage({ params }: { params: Promise<{ slug: string }> }) {
   const { slug } = use(params);
+  const queryClient = useQueryClient();
   const docQuery = useQuery({ queryKey: ["doc", slug], queryFn: () => api.getDoc(slug) });
   const versionsQuery = useQuery({ queryKey: ["doc-versions", slug], queryFn: () => api.getDocVersions(slug) });
+
+  const acceptMutation = useMutation({
+    mutationFn: () => api.acceptDoc(slug, docQuery.data!.body),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["doc", slug] });
+      queryClient.invalidateQueries({ queryKey: ["doc-versions", slug] });
+    },
+  });
 
   return (
     // Page owns its own scroll region + padding (AppShell's <main> is
@@ -30,6 +39,8 @@ export default function DocDetailPage({ params }: { params: Promise<{ slug: stri
           tags={docQuery.data.tags}
           body={docQuery.data.body}
           versions={versionsQuery.data ?? []}
+          onAccept={() => acceptMutation.mutate()}
+          accepting={acceptMutation.isPending}
         />
       )}
     </div>

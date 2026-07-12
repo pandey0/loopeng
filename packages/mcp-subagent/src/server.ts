@@ -2,7 +2,8 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 import { spawnSubAgent, SubAgentDepthExceededError } from "@loopeng/agents";
-import { getDoc } from "@loopeng/doc-engine";
+import { cardDocLinks, db } from "@loopeng/db";
+import { createDoc, getDoc } from "@loopeng/doc-engine";
 
 // This process is spawned per-session by the `claude` CLI (via --mcp-config,
 // see buildSubAgentMcpConfig in @loopeng/agents) — one instance per running
@@ -102,6 +103,57 @@ server.registerTool(
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       return { isError: true, content: [{ type: "text" as const, text: `get_doc failed: ${message}` }] };
+    }
+  },
+);
+
+server.registerTool(
+  "create_adr_doc",
+  {
+    description:
+      "Create an Architecture Decision Record (ADR) doc for the current card and link it (linkType=adr). " +
+      "Use this once, as part of your normal work, on any card that touches architecture -- the adr_required " +
+      "gate blocks such cards from merging until an accepted ADR is linked. The ADR is created at " +
+      "status='proposed', not 'accepted': a human reviews and accepts it afterwards via the docs UI, so you " +
+      "don't need (and cannot) accept it yourself in this run.",
+    inputSchema: {
+      slug: z.string().min(1).describe("Kebab-case slug for the ADR doc, unique across all docs (e.g. 'per-project-repo-resolution')."),
+      title: z.string().min(1).describe("Human-readable ADR title."),
+      summary: z
+        .string()
+        .min(1)
+        .max(200)
+        .describe("One-line summary (no newlines) — shown next to this doc's slug in future agent prompts instead of the full body."),
+      content: z
+        .string()
+        .min(1)
+        .describe("Full ADR body in markdown, e.g. Context / Decision / Consequences / Alternatives Considered sections."),
+      tags: z.array(z.string()).default([]),
+    },
+  },
+  async ({ slug, title, summary, content, tags }) => {
+    try {
+      const ctx = readEnvContext();
+      if (!ctx.cardId) {
+        return {
+          isError: true,
+          content: [{ type: "text" as const, text: "create_adr_doc: no card is associated with this agent run, nothing to link the ADR to" }],
+        };
+      }
+      const doc = await createDoc(
+        { slug, title, docType: "adr", content, summary, tags, message: `implementer: draft ADR "${title}"` },
+        { status: "proposed" },
+      );
+      await db.insert(cardDocLinks).values({ cardId: ctx.cardId, docId: doc.id, linkType: "adr" }).onConflictDoNothing();
+      return {
+        isError: false,
+        content: [
+          { type: "text" as const, text: `Created ADR "${title}" (slug: ${slug}, status: proposed) and linked it to this card as linkType=adr.` },
+        ],
+      };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      return { isError: true, content: [{ type: "text" as const, text: `create_adr_doc failed: ${message}` }] };
     }
   },
 );

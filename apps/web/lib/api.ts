@@ -264,4 +264,14 @@ export const api = {
     tags?: string[];
     message?: string;
   }) => request<Doc>("/docs", { method: "POST", body: JSON.stringify(input) }),
+  // Flips a proposed doc (e.g. an ADR) to accepted via the existing
+  // POST /docs/:slug/versions endpoint -- the UI-level equivalent of the raw
+  // curl call that was previously the only way to unblock the adr_required
+  // gate. `content` must be the doc's current body: updateDoc rewrites the
+  // whole file, so omitting it would silently wipe the doc's content.
+  acceptDoc: (slug: string, content: string) =>
+    request<Doc>(`/docs/${slug}/versions`, {
+      method: "POST",
+      body: JSON.stringify({ content, status: "accepted", message: "accept doc" }),
+    }),
 };

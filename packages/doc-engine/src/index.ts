@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 import { eq } from "drizzle-orm";
 import { db } from "@loopeng/db";
 import { adrs, docVersions, docs, skills } from "@loopeng/db";
-import type { DocCreateInput, DocUpdateInput } from "@loopeng/shared";
+import type { DocCreateInput, DocStatus, DocUpdateInput } from "@loopeng/shared";
 import { GitDocClient, repoRelativePath } from "./git-client.js";
 import { assertValidSummary, parseDoc, stringifyDoc, type DocFrontmatter } from "./frontmatter.js";
 
@@ -36,15 +36,23 @@ export async function getTemplate(docType: "adr" | "rfc" | "skill"): Promise<str
   return readFile(path.join(TEMPLATES_DIR, `${docType}.md`), "utf-8");
 }
 
-export async function createDoc(input: DocCreateInput) {
+// The optional `status` override exists for callers that need a doc to start
+// somewhere other than "draft" -- e.g. the implementer agent's create_adr_doc
+// MCP tool (packages/mcp-subagent/src/server.ts) creates ADRs straight into
+// "proposed", since an ADR drafted by an agent is immediately ready for human
+// review, not a private work-in-progress. Not exposed on DocCreateInput/the
+// public POST /docs route: every other caller (planner spec docs, designer
+// specs, project briefs) wants the existing "draft" default unchanged.
+export async function createDoc(input: DocCreateInput, options?: { status?: DocStatus }) {
   await ensureRepoReady();
+  const status = options?.status ?? "draft";
   const relPath = repoRelativePath(input.docType, input.slug);
   const frontmatter: DocFrontmatter = {
     id: input.slug,
     type: input.docType,
     title: input.title,
     summary: input.summary,
-    status: "draft",
+    status,
     tags: input.tags,
     linked_cards: [],
     supersedes: null,
@@ -62,7 +70,7 @@ export async function createDoc(input: DocCreateInput) {
       repoPath: relPath,
       latestCommitSha: sha,
       summary: input.summary,
-      status: "draft",
+      status,
       tags: input.tags,
       createdBy: input.authorId ?? null,
     })

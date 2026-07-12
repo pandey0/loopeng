@@ -82,6 +82,20 @@ describe("buildImplementerPrompt", () => {
     expect(prompt).not.toContain("## Previous questions & answers");
   });
 
+  it("instructs the agent to draft and link an ADR when the card touches architecture", () => {
+    const prompt = buildImplementerPrompt(card({ touchesArchitecture: true }), []);
+    expect(prompt).toContain("## Architecture decision record required");
+    expect(prompt).toContain("create_adr_doc");
+    expect(prompt).toContain("linkType=adr");
+    expect(prompt).toContain("status=proposed");
+  });
+
+  it("omits the ADR instruction when the card does not touch architecture", () => {
+    const prompt = buildImplementerPrompt(card({ touchesArchitecture: false }), []);
+    expect(prompt).not.toContain("## Architecture decision record required");
+    expect(prompt).not.toContain("create_adr_doc");
+  });
+
   it("injects previously answered questions into the prompt", () => {
     const prompt = buildImplementerPrompt(card(), [], undefined, [], [
       { question: "should sessions expire after 1h or 24h?", answer: "24h" },

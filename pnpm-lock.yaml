@@ -35,6 +35,9 @@ importers:
       '@loopeng/doc-engine':
         specifier: workspace:*
         version: link:../../packages/doc-engine
+      '@loopeng/gates':
+        specifier: workspace:*
+        version: link:../../packages/gates
       '@loopeng/orchestrator':
         specifier: workspace:*
         version: link:../../packages/orchestrator
