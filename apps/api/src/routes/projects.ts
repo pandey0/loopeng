@@ -1,9 +1,12 @@
 import type { FastifyPluginAsync } from "fastify";
-import { desc, eq } from "drizzle-orm";
-import { agentRuns, boards, projects } from "@loopeng/db";
+import { desc, eq, inArray } from "drizzle-orm";
+import { agentRuns, boards, cardDependencies, cards, projects } from "@loopeng/db";
+import { buildDependencyInfoMap } from "@loopeng/board-engine";
 import { ProjectCreateInputSchema } from "@loopeng/shared";
 import { runProjectAnalyzerAgent } from "@loopeng/agents";
 import { cloneProjectRepo, InvalidRepoError, isValidGitRepoRoot, RepoCloneError } from "@loopeng/worktree-manager";
+
+const EXPORT_SCHEMA_VERSION = 1;
 
 export const projectRoutes: FastifyPluginAsync = async (fastify) => {
   fastify.get("/projects", async () => {
@@ -74,6 +77,45 @@ export const projectRoutes: FastifyPluginAsync = async (fastify) => {
       return;
     }
     return project;
+  });
+
+  // Read-only JSON snapshot of a project's cards (any cardType, epics
+  // included) for external consumption -- no docs/comments/activity, just
+  // the cards table's own fields plus each card's epic linkage (the same
+  // "first relates_to edge" derivation GET /cards uses via attachCardStatus,
+  // reused directly here rather than through attachCardStatus so this
+  // endpoint doesn't also leak activeAgentRun/blockedReason activity data).
+  fastify.get<{ Params: { id: string } }>("/projects/:id/export", async (request, reply) => {
+    const [project] = await fastify.db.select().from(projects).where(eq(projects.id, request.params.id));
+    if (!project) {
+      reply.status(404).send({ error: "not_found", message: `no project exists with id ${request.params.id}` });
+      return;
+    }
+
+    const projectBoards = await fastify.db.select({ id: boards.id }).from(boards).where(eq(boards.projectId, project.id));
+    const boardIds = projectBoards.map((b) => b.id);
+
+    const cardRows = boardIds.length ? await fastify.db.select().from(cards).where(inArray(cards.boardId, boardIds)) : [];
+    const cardIds = cardRows.map((c) => c.id);
+
+    const edges = cardIds.length
+      ? await fastify.db
+          .select({ cardId: cardDependencies.cardId, dependsOnCardId: cardDependencies.dependsOnCardId, dependencyType: cardDependencies.dependencyType })
+          .from(cardDependencies)
+          .where(inArray(cardDependencies.cardId, cardIds))
+      : [];
+    const referencedIds = [...new Set(edges.map((e) => e.dependsOnCardId))];
+    const referencedCards = referencedIds.length
+      ? await fastify.db.select({ id: cards.id, title: cards.title, state: cards.state }).from(cards).where(inArray(cards.id, referencedIds))
+      : [];
+    const dependencyInfo = buildDependencyInfoMap(cardIds, edges, referencedCards);
+
+    reply.status(200).send({
+      schemaVersion: EXPORT_SCHEMA_VERSION,
+      exportedAt: new Date().toISOString(),
+      project: { id: project.id, name: project.name },
+      cards: cardRows.map((card) => ({ ...card, epicId: dependencyInfo.get(card.id)?.epicId ?? null })),
+    });
   });
 
   // The analyzer run that's currently building (or last built) this
