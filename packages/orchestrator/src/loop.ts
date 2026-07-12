@@ -6,6 +6,7 @@ import { createWorktree, getActiveWorktree, InvalidRepoError } from "@loopeng/wo
 import {
   distillFailureNote,
   hasDesignerSpecDoc,
+  isRateLimitError,
   resolveQuestionRouting,
   runDesignerReviewAgent,
   runDesignerSpecAgent,
@@ -16,6 +17,39 @@ import { cardTouchesUi, runGatePipeline } from "@loopeng/gates";
 import type { HookRegistry } from "./hooks.js";
 
 const MAX_ATTEMPTS = 3;
+
+// A rate/session-limit hit isn't a real failure of the card's work -- the
+// account just can't make another CLI call yet. Retrying immediately (the
+// normal MAX_ATTEMPTS loop) would almost certainly hit the same limit
+// again, burning a real attempt on nothing; worse, for the reviewer
+// specifically, its "fail closed on any CLI error" design (see
+// runReviewerAgent) means an unhandled rate-limit read exactly like a
+// genuine rejection. Blocks the card (visible, honest reason -- see
+// isAutoRetrying) without touching the attempt counter, and schedules a
+// real retry later instead of leaving it for a human to notice and requeue.
+const RATE_LIMIT_BACKOFF_MS = Number(process.env.ORCHESTRATOR_RATE_LIMIT_BACKOFF_MS ?? 20 * 60 * 1000);
+
+function scheduleRateLimitRetry(cardId: string): void {
+  setTimeout(() => {
+    applyTransition({
+      cardId,
+      toState: "ready",
+      actorType: "automation",
+      reason: "auto-retrying after rate-limit backoff",
+    }).catch((err) => console.error(`[orchestrator] rate-limit retry requeue failed for card ${cardId}`, err));
+  }, RATE_LIMIT_BACKOFF_MS).unref();
+}
+
+async function blockForRateLimit(cardId: string, resultText: string): Promise<void> {
+  const minutes = Math.round(RATE_LIMIT_BACKOFF_MS / 60000);
+  await applyTransition({
+    cardId,
+    toState: "blocked",
+    actorType: "automation",
+    reason: `rate-limited, not a real failure — retrying automatically in ~${minutes} min: ${resultText.slice(0, 300)}`,
+  });
+  scheduleRateLimitRetry(cardId);
+}
 
 // Kept short: card_questions.question stores the full text, this is only
 // the blockedReason-style summary carried on OrchestrateOutcome.
@@ -160,6 +194,10 @@ export async function orchestrateCard(cardId: string, hooks: HookRegistry): Prom
     }
 
     if (implResult.isError) {
+      if (isRateLimitError(implResult.resultText)) {
+        await blockForRateLimit(cardId, implResult.resultText);
+        return { status: "blocked", reason: "rate_limited" };
+      }
       if (attempt < MAX_ATTEMPTS) {
         priorFailureNote = distillFailureNote("implementer_error", implResult.resultText);
         continue; // retry in the same worktree, still in_progress
@@ -192,6 +230,15 @@ export async function orchestrateCard(cardId: string, hooks: HookRegistry): Prom
     }
 
     if (reviewResult.verdict === "fail") {
+      // reviewResult.verdict is "fail" for a genuine rejection *and* for a
+      // CLI-level error (fail-closed, see runReviewerAgent) -- isError
+      // narrows to the latter, and isRateLimitError confirms which kind of
+      // error before treating it as exempt from the retry count. A real
+      // review rejection still counts normally below.
+      if (reviewResult.isError && isRateLimitError(reviewResult.resultText)) {
+        await blockForRateLimit(cardId, reviewResult.resultText);
+        return { status: "blocked", reason: "rate_limited" };
+      }
       if (attempt < MAX_ATTEMPTS) {
         await applyTransition({
           cardId,

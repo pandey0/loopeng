@@ -25,6 +25,10 @@ describe("isAutoRetrying", () => {
     expect(isAutoRetrying('implementer run interrupted (stuck in "running" at boot -- likely an api restart mid-run)')).toBe(true);
   });
 
+  it("is true for a rate-limited run scheduled for later automatic retry", () => {
+    expect(isAutoRetrying("rate-limited, not a real failure — retrying automatically in ~20 min")).toBe(true);
+  });
+
   it("is false for a gate failure -- that needs an actual fix, not a timer", () => {
     expect(isAutoRetrying("security_scan failed")).toBe(false);
   });

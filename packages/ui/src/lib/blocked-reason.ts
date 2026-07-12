@@ -10,17 +10,18 @@ export function isHumanBlocked(blockedReason: string | null | undefined): boolea
   return !!blockedReason?.startsWith(HUMAN_BLOCKED_PREFIX);
 }
 
-// packages/orchestrator/src/reconcile.ts writes this exact substring for the
-// one blocked reason that genuinely does resolve itself: a run orphaned by
-// an api restart, where nothing about the card's actual work was wrong.
-// reconcile.ts auto-requeues it immediately (blocked -> ready, capped at
-// MAX_AUTO_REQUEUE attempts) -- this is only ever visible in the brief
-// window before that happens, or on the rare card that hit the cap. Every
-// *other* system-blocked reason (a failing gate, a rejected review, a
+// Two blocked reasons genuinely resolve themselves, both written by the
+// orchestrator, not a human: a run orphaned by an api restart
+// (packages/orchestrator/src/reconcile.ts, auto-requeued immediately,
+// capped at MAX_AUTO_REQUEUE) and a CLI call that hit the account's own
+// rate/session limit (packages/orchestrator/src/loop.ts, scheduled for a
+// later automatic retry, not counted against the card's normal retry
+// attempts). Neither is a real problem with the card's work. Every *other*
+// system-blocked reason (a failing gate, a genuinely rejected review, a
 // crashed implementer) needs an actual fix before a retry means anything;
 // claiming those "auto-retry" too would just be wrong.
-const RESTART_ORPHAN_MARKER = 'interrupted (stuck in "';
+const AUTO_RETRY_MARKERS = ['interrupted (stuck in "', "rate-limited, not a real failure"];
 
 export function isAutoRetrying(blockedReason: string | null | undefined): boolean {
-  return !!blockedReason?.includes(RESTART_ORPHAN_MARKER);
+  return !!blockedReason && AUTO_RETRY_MARKERS.some((marker) => blockedReason.includes(marker));
 }

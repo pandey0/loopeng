@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { distillFailureNote } from "./failure-note.js";
+import { distillFailureNote, isRateLimitError } from "./failure-note.js";
 
 describe("distillFailureNote", () => {
   it("caps the note at 10 lines even for a huge rejection transcript", () => {
@@ -34,5 +34,23 @@ describe("distillFailureNote", () => {
     const note = distillFailureNote("implementer_error", longLine);
     const bodyLine = note.split("\n")[1];
     expect(bodyLine?.length).toBeLessThan(350);
+  });
+});
+
+describe("isRateLimitError", () => {
+  it("recognizes the real Claude CLI session-limit message", () => {
+    expect(isRateLimitError("You've hit your session limit · resets 1:40am (Asia/Kolkata)")).toBe(true);
+  });
+
+  it("is case-insensitive", () => {
+    expect(isRateLimitError("RATE LIMIT exceeded, try again later")).toBe(true);
+  });
+
+  it("is false for a genuine implementer crash", () => {
+    expect(isRateLimitError("TypeError: cannot read property 'foo' of undefined")).toBe(false);
+  });
+
+  it("is false for a genuine review rejection", () => {
+    expect(isRateLimitError("VERDICT: FAIL\nCRITERION: handles null email -> NOT SATISFIED")).toBe(false);
   });
 });
