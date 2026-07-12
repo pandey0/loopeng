@@ -3,6 +3,13 @@ import type { CardWithStatus } from "@loopeng/shared";
 
 const TYPING_TAGS = new Set(["INPUT", "TEXTAREA"]);
 
+// Exported for unit testing without a DOM: true when the event target is
+// already a text input/textarea, so single-letter shortcuts (j/k/a/?/`/`)
+// shouldn't fire while the user is typing into it.
+export function isTypingTarget(target: { tagName: string } | null | undefined): boolean {
+  return !!target && TYPING_TAGS.has(target.tagName);
+}
+
 export interface BoardKeyboardShortcuts {
   focusedCardId: string | null;
   shortcutsOpen: boolean;
@@ -25,7 +32,7 @@ export function useBoardKeyboardShortcuts(
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
       const target = e.target as HTMLElement | null;
-      if (target && TYPING_TAGS.has(target.tagName)) return;
+      if (isTypingTarget(target)) return;
 
       if (e.key === "/") {
         e.preventDefault();
