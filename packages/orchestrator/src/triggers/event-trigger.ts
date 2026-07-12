@@ -63,7 +63,7 @@ export async function promoteUnblockedDependents(doneCardId: string, coordinatio
 // event would, once per boot, so a restart can never strand a ready card
 // indefinitely (only the once-daily cron morning-triage would otherwise
 // catch it).
-async function sweepReadyCardsAtBoot(coordination: CoordinationStrategy): Promise<void> {
+export async function sweepReadyCardsAtBoot(coordination: CoordinationStrategy): Promise<void> {
   const readyCards = await db.select({ id: cards.id }).from(cards).where(eq(cards.state, "ready"));
   for (const card of readyCards) {
     if (!(await isReady(card.id))) continue;
