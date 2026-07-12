@@ -1,8 +1,9 @@
-import { and, eq, inArray } from "drizzle-orm";
+import { and, desc, eq, inArray } from "drizzle-orm";
 import { db } from "@loopeng/db";
 import { agentRoles, agentRuns, cards, eventLog } from "@loopeng/db";
 import { applyTransition } from "@loopeng/board-engine";
 import type { CardState } from "@loopeng/shared";
+import { RATE_LIMIT_BACKOFF_MS, RATE_LIMIT_MARKER, scheduleRateLimitRetry } from "./loop.js";
 
 // States where a card's next move is genuinely owned by an in-flight agent
 // run -- not awaiting_approval (no run is active by definition, a human owns
@@ -99,4 +100,54 @@ export async function reconcileOrphanedRuns(): Promise<number> {
   }
 
   return latestByCard.size;
+}
+
+// scheduleRateLimitRetry (loop.ts) arms a bare setTimeout the moment a card
+// is blocked for a rate limit -- nothing persists *when* it's due, so an api
+// restart before it fires (deploy, crash, dev-loop restart) drops the
+// pending requeue silently and the card is stuck in "blocked" forever, with
+// its blockedReason (buildBlockedReasonMap) never even surfacing the
+// rate-limit prose since that reason only lives on the card.moved event, not
+// on any row buildBlockedReasonMap reads. Recorded live on 2026-07-12: two
+// cards blocked for a session-limit reset sat well past their own stated
+// "~20 min" window with no further activity after an unrelated api restart.
+//
+// Runs once at boot, same as reconcileOrphanedRuns: sweep blocked cards
+// whose most recent card.moved event is a rate-limit block, and either
+// requeue immediately (if the backoff window already elapsed -- the common
+// case after any outage that takes more than a few minutes to notice and
+// recover from) or re-arm a timer for whatever's left of it.
+export async function reconcileRateLimitedCards(): Promise<number> {
+  const blocked = await db.select({ id: cards.id }).from(cards).where(eq(cards.state, "blocked"));
+  if (blocked.length === 0) return 0;
+
+  let requeued = 0;
+  for (const card of blocked) {
+    const [latestMove] = await db
+      .select({ payload: eventLog.payload, createdAt: eventLog.createdAt })
+      .from(eventLog)
+      .where(and(eq(eventLog.entityType, "card"), eq(eventLog.entityId, card.id), eq(eventLog.eventType, "card.moved")))
+      .orderBy(desc(eventLog.createdAt))
+      .limit(1);
+    if (!latestMove) continue;
+
+    const payload = latestMove.payload as { to?: string; reason?: string };
+    if (payload.to !== "blocked" || !payload.reason?.startsWith(RATE_LIMIT_MARKER)) continue;
+
+    const elapsedMs = Date.now() - latestMove.createdAt.getTime();
+    const remainingMs = RATE_LIMIT_BACKOFF_MS - elapsedMs;
+    if (remainingMs <= 0) {
+      await applyTransition({
+        cardId: card.id,
+        toState: "ready",
+        actorType: "automation",
+        reason: "auto-retrying after rate-limit backoff (requeued at boot -- the original timer was lost to a process restart)",
+      });
+      requeued++;
+    } else {
+      scheduleRateLimitRetry(card.id, remainingMs);
+    }
+  }
+
+  return requeued;
 }

@@ -1,6 +1,6 @@
 import fp from "fastify-plugin";
 import type { FastifyPluginAsync } from "fastify";
-import { reconcileOrphanedRuns, startOrchestrator, type Orchestrator } from "@loopeng/orchestrator";
+import { reconcileOrphanedRuns, reconcileRateLimitedCards, startOrchestrator, type Orchestrator } from "@loopeng/orchestrator";
 
 declare module "fastify" {
   interface FastifyInstance {
@@ -30,6 +30,18 @@ export const orchestratorPlugin: FastifyPluginAsync = fp(async (fastify) => {
   const reconciled = await reconcileOrphanedRuns();
   if (reconciled > 0) {
     fastify.log.warn(`reconciled ${reconciled} card(s) orphaned by a prior process restart -> blocked`);
+  }
+
+  // Same data-hygiene reasoning as reconcileOrphanedRuns above: a rate-limit
+  // retry timer lives only in the process that scheduled it, so any restart
+  // between the block and the retry firing strands the card in "blocked"
+  // forever with no other trigger to move it. Unconditional for the same
+  // reason -- the dev box most likely to inherit a stranded rate-limit
+  // block from a *previous* run is also the one where gating this behind
+  // ORCHESTRATOR_ENABLED would mean it never runs.
+  const requeued = await reconcileRateLimitedCards();
+  if (requeued > 0) {
+    fastify.log.warn(`requeued ${requeued} card(s) stranded by a rate-limit timer lost to a prior process restart`);
   }
 
   if (process.env.ORCHESTRATOR_ENABLED !== "1") {

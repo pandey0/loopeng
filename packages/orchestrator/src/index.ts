@@ -12,7 +12,7 @@ export * from "./router.js";
 export * from "./coordination/types.js";
 export { HierarchicalStrategy } from "./coordination/hierarchical.js";
 export { MeshStrategy } from "./coordination/mesh.js";
-export { reconcileOrphanedRuns } from "./reconcile.js";
+export { reconcileOrphanedRuns, reconcileRateLimitedCards } from "./reconcile.js";
 
 export interface Orchestrator {
   coordination: CoordinationStrategy;

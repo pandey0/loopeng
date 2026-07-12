@@ -27,9 +27,20 @@ const MAX_ATTEMPTS = 3;
 // genuine rejection. Blocks the card (visible, honest reason -- see
 // isAutoRetrying) without touching the attempt counter, and schedules a
 // real retry later instead of leaving it for a human to notice and requeue.
-const RATE_LIMIT_BACKOFF_MS = Number(process.env.ORCHESTRATOR_RATE_LIMIT_BACKOFF_MS ?? 20 * 60 * 1000);
+export const RATE_LIMIT_BACKOFF_MS = Number(process.env.ORCHESTRATOR_RATE_LIMIT_BACKOFF_MS ?? 20 * 60 * 1000);
 
-function scheduleRateLimitRetry(cardId: string): void {
+// Prefix marker on the card.moved reason recorded by blockForRateLimit --
+// stable across the actual minutes-remaining prose, so reconcile.ts can
+// pick out rate-limit blocks from every other reason a card ends up
+// blocked. Keep it exact and check for it verbatim (mirrors
+// RESTART_ORPHAN_MARKER in reconcile.ts).
+export const RATE_LIMIT_MARKER = "rate-limited, not a real failure";
+
+// Exported so reconcile.ts can re-arm a timer for the *remaining* backoff
+// after a process restart, instead of only ever scheduling the full
+// RATE_LIMIT_BACKOFF_MS from now -- see scheduleRateLimitRetry's own
+// setTimeout for why a restart drops this silently otherwise.
+export function scheduleRateLimitRetry(cardId: string, delayMs: number = RATE_LIMIT_BACKOFF_MS): void {
   setTimeout(() => {
     applyTransition({
       cardId,
@@ -37,7 +48,7 @@ function scheduleRateLimitRetry(cardId: string): void {
       actorType: "automation",
       reason: "auto-retrying after rate-limit backoff",
     }).catch((err) => console.error(`[orchestrator] rate-limit retry requeue failed for card ${cardId}`, err));
-  }, RATE_LIMIT_BACKOFF_MS).unref();
+  }, Math.max(delayMs, 0)).unref();
 }
 
 async function blockForRateLimit(cardId: string, resultText: string): Promise<void> {
@@ -46,7 +57,7 @@ async function blockForRateLimit(cardId: string, resultText: string): Promise<vo
     cardId,
     toState: "blocked",
     actorType: "automation",
-    reason: `rate-limited, not a real failure — retrying automatically in ~${minutes} min: ${resultText.slice(0, 300)}`,
+    reason: `${RATE_LIMIT_MARKER} — retrying automatically in ~${minutes} min: ${resultText.slice(0, 300)}`,
   });
   scheduleRateLimitRetry(cardId);
 }
