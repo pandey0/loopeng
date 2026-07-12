@@ -16,8 +16,14 @@ import {
   buildAgentRunTree,
   flattenAgentRunTree,
 } from "@loopeng/ui";
-import { matchCriterionVerdicts, parseCriterionVerdicts, type GateResultStatus, type RiskTier } from "@loopeng/shared";
-import { api, type CardDetailAgentRun } from "../../../lib/api";
+import {
+  matchCriterionVerdicts,
+  nextBoardState,
+  parseCriterionVerdicts,
+  type GateResultStatus,
+  type RiskTier,
+} from "@loopeng/shared";
+import { api, ApiError, type CardDetailAgentRun } from "../../../lib/api";
 import { AgentSessionPanel } from "./AgentSessionPanel";
 
 // A gate's `detail` blob (failure reasons, stderr tails, criteria breakdowns,
@@ -76,6 +82,8 @@ export default function CardDetailPage({ params }: { params: Promise<{ cardId: s
   const [sessionRun, setSessionRun] = useState<CardDetailAgentRun | null>(null);
   const [answerDrafts, setAnswerDrafts] = useState<Record<string, string>>({});
   const [answering, setAnswering] = useState<string | null>(null);
+  const [advancing, setAdvancing] = useState(false);
+  const [advanceError, setAdvanceError] = useState<string | null>(null);
 
   useEffect(() => {
     if (detailQuery.data) setCriteria(detailQuery.data.acceptanceCriteria);
@@ -191,6 +199,20 @@ export default function CardDetailPage({ params }: { params: Promise<{ cardId: s
       alert((err as Error).message);
     } finally {
       setAnswering(null);
+    }
+  }
+
+  async function advanceCard() {
+    setAdvancing(true);
+    setAdvanceError(null);
+    try {
+      await api.advanceCard(cardId);
+      queryClient.invalidateQueries({ queryKey: ["card-detail", cardId] });
+      queryClient.invalidateQueries({ queryKey: ["cards"] });
+    } catch (err) {
+      setAdvanceError(err instanceof ApiError ? err.message : (err as Error).message);
+    } finally {
+      setAdvancing(false);
     }
   }
 
@@ -521,7 +543,7 @@ export default function CardDetailPage({ params }: { params: Promise<{ cardId: s
           ← Back to board
         </Link>
         <h1 className="mb-2.5 text-[22px] font-bold leading-tight">{card.title}</h1>
-        <div className="mb-[26px] flex flex-wrap gap-2">
+        <div className={cn("flex flex-wrap items-center gap-2", advanceError ? "mb-2" : "mb-[26px]")}>
           <span className={cn("rounded-[5px] px-2 py-[3px] font-mono text-[11px] font-bold", priorityBadgeClass(card.priority))}>
             P{card.priority}
           </span>
@@ -538,7 +560,16 @@ export default function CardDetailPage({ params }: { params: Promise<{ cardId: s
             </span>
           )}
           <StatusBadge status={card.state} className="rounded-[5px] px-2 py-[3px] font-mono text-[11px] font-bold" />
+          <Button
+            size="sm"
+            disabled={advancing || nextBoardState(card.state) === null}
+            onClick={advanceCard}
+            className="rounded-[5px] px-2 py-[3px] font-mono text-[11px] font-bold"
+          >
+            {advancing ? "Moving…" : "Move to next step"}
+          </Button>
         </div>
+        {advanceError && <p className="mb-[18px] text-[12.5px] text-destructive">{advanceError}</p>}
 
         <Tabs
           items={[
