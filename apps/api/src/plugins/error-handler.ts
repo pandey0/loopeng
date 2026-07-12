@@ -1,7 +1,12 @@
 import fp from "fastify-plugin";
 import type { FastifyError, FastifyPluginAsync } from "fastify";
 import { ZodError } from "zod";
-import { ConcurrentTransitionError, InvalidTransitionError } from "@loopeng/board-engine";
+import {
+  CardNotFoundError,
+  ConcurrentTransitionError,
+  InvalidTransitionError,
+  NoNextStateError,
+} from "@loopeng/board-engine";
 
 export const errorHandlerPlugin: FastifyPluginAsync = fp(async (fastify) => {
   fastify.setErrorHandler((error: FastifyError, _request, reply) => {
@@ -15,6 +20,14 @@ export const errorHandlerPlugin: FastifyPluginAsync = fp(async (fastify) => {
     }
     if (error instanceof ConcurrentTransitionError) {
       reply.status(409).send({ error: "concurrent_transition", message: error.message });
+      return;
+    }
+    if (error instanceof CardNotFoundError) {
+      reply.status(404).send({ error: "not_found", message: error.message });
+      return;
+    }
+    if (error instanceof NoNextStateError) {
+      reply.status(409).send({ error: "no_next_state", message: error.message });
       return;
     }
     fastify.log.error(error);

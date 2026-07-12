@@ -35,28 +35,30 @@ export function canTransition(from: CardState, to: CardState): boolean {
   return TRANSITIONS[from]?.includes(to) ?? false;
 }
 
-// The board's single ordered column list -- same order the board UI renders
-// columns in (apps/web/app/board/page.tsx PHASE_3_COLUMNS). Drag-and-drop can
-// jump to any column canTransition allows (not just the adjacent one); this
-// order is what "advance to next column" walks. cancelled has no column and
-// is reached only via backlog/ready's "cancel" edge, so it's excluded here.
-export const BOARD_COLUMN_ORDER: readonly CardState[] = [
-  "backlog",
-  "ready",
-  "in_progress",
-  "in_review",
-  "gate_checks",
-  "awaiting_approval",
-  "deploying",
-  "deploy_failed",
-  "blocked",
-  "done",
-];
+// The single "forward" edge out of each non-terminal state, used by the card
+// detail page's "move to next step" button -- a convenience for the exact
+// move a human could already make by dragging the card one column over, not
+// a new state machine. Every value here is a real TRANSITIONS edge (picking
+// the forward/happy-path branch where a state has more than one legal
+// target, e.g. in_review also allows done/blocked and gate_checks also
+// allows deploying/blocked) so this can never grant a move canTransition
+// would reject. A prior version of this walked a fixed column-order list
+// instead, which sent blocked -> done (not a legal edge -- would throw) and
+// deploy_failed -> blocked (legal, but not the documented "retry just the
+// deploy step" recovery path above) -- caught live by an integrator agent
+// rebasing two independent implementations of the /advance endpoint.
+export const NEXT_STATE: Partial<Record<CardState, CardState>> = {
+  backlog: "ready",
+  ready: "in_progress",
+  in_progress: "in_review",
+  in_review: "gate_checks",
+  gate_checks: "awaiting_approval",
+  awaiting_approval: "deploying",
+  deploying: "done",
+  deploy_failed: "deploying",
+  blocked: "ready",
+};
 
-// null means "no next column" -- either state is the last column (done) or
-// isn't part of the ordered list at all (cancelled).
-export function nextBoardState(state: CardState): CardState | null {
-  const idx = BOARD_COLUMN_ORDER.indexOf(state);
-  if (idx === -1 || idx === BOARD_COLUMN_ORDER.length - 1) return null;
-  return BOARD_COLUMN_ORDER[idx + 1] ?? null;
+export function getNextState(from: CardState): CardState | null {
+  return NEXT_STATE[from] ?? null;
 }

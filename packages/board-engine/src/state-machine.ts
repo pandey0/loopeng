@@ -1,12 +1,12 @@
 import { and, eq } from "drizzle-orm";
 import { db } from "@loopeng/db";
 import { cards, eventLog } from "@loopeng/db";
-import { canTransition, nextBoardState } from "@loopeng/shared";
+import { canTransition, getNextState } from "@loopeng/shared";
 import type { CardState } from "@loopeng/shared";
 
 // Transition graph lives in @loopeng/shared so client code (the board UI)
 // can validate drags without pulling in this package's @loopeng/db dependency.
-export { TRANSITIONS, canTransition, BOARD_COLUMN_ORDER, nextBoardState } from "@loopeng/shared";
+export { TRANSITIONS, canTransition, NEXT_STATE, getNextState } from "@loopeng/shared";
 
 export interface ApplyTransitionInput {
   cardId: string;
@@ -83,15 +83,12 @@ export class CardNotFoundError extends Error {
   }
 }
 
-// Thrown when a card has no next column to advance into -- either it's
-// sitting in the last column (done) or in a state the ordered column list
-// doesn't cover (cancelled). Distinct from InvalidTransitionError, which
-// means there *is* a next column but the transition graph forbids moving to
-// it (e.g. blocked -> done, since blocked's array-adjacent "next" isn't a
-// legal recovery edge).
-export class TerminalColumnError extends Error {
+// Thrown when a card has no declared forward edge (NEXT_STATE) to advance
+// into -- either it's in a terminal state (done, cancelled) or a state
+// that's otherwise not part of the "move to next step" happy path.
+export class NoNextStateError extends Error {
   constructor(cardId: string, state: CardState) {
-    super(`card ${cardId} has no next column from terminal state "${state}"`);
+    super(`card ${cardId} has no next step from state "${state}"`);
   }
 }
 
@@ -101,18 +98,20 @@ export interface AdvanceCardInput {
   actorId?: string;
 }
 
-// Moves a card to the next column in the board's ordered column list,
-// through the exact same applyTransition write path drag-and-drop uses --
-// same UPDATE ... WHERE state=fromState guard, same card.moved event, so
-// orchestrator triggers and history logging fire identically to a manual
-// drag. No gating beyond what applyTransition/canTransition already enforce.
-export async function advanceCardState(input: AdvanceCardInput) {
+// Backs the card detail page's "move to next step" button: resolves the
+// card's current state to its single forward edge (see getNextState) and
+// runs it through the exact same applyTransition write path drag-and-drop
+// uses -- same UPDATE ... WHERE state=fromState guard, same card.moved
+// event, so orchestrator triggers and history logging fire identically to a
+// manual drag. No gating beyond what applyTransition/canTransition already
+// enforce -- getNextState can only ever produce a real TRANSITIONS edge.
+export async function advanceCard(input: AdvanceCardInput) {
   const [card] = await db.select().from(cards).where(eq(cards.id, input.cardId));
   if (!card) throw new CardNotFoundError(input.cardId);
 
   const fromState = card.state as CardState;
-  const toState = nextBoardState(fromState);
-  if (!toState) throw new TerminalColumnError(input.cardId, fromState);
+  const toState = getNextState(fromState);
+  if (!toState) throw new NoNextStateError(input.cardId, fromState);
 
   return applyTransition({ cardId: input.cardId, toState, actorType: input.actorType, actorId: input.actorId });
 }

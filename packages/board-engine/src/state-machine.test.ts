@@ -1,7 +1,13 @@
 import { and, eq } from "drizzle-orm";
 import { boards, cards, db, eventLog, pool, projects } from "@loopeng/db";
 import { afterAll, describe, expect, it } from "vitest";
-import { applyTransition, ConcurrentTransitionError, InvalidTransitionError } from "./state-machine.js";
+import {
+  advanceCard,
+  applyTransition,
+  ConcurrentTransitionError,
+  InvalidTransitionError,
+  NoNextStateError,
+} from "./state-machine.js";
 
 // Regression test for the 2026-07-02 duplicate-orchestrator incident: two
 // dispatchers racing to move the same ready card into in_progress at the
@@ -90,5 +96,36 @@ describe("applyTransition (concurrent dispatch)", () => {
 
     expect(a.state).toBe("in_progress");
     expect(b.state).toBe("in_progress");
+  });
+
+  it("advanceCard moves a card along the same forward edge the detail page's 'move to next step' button uses", async () => {
+    const cardId = await makeReadyCard("advance: ready card");
+
+    const afterFirst = await advanceCard({ cardId, actorType: "user" });
+    expect(afterFirst.state).toBe("in_progress");
+
+    const afterSecond = await advanceCard({ cardId, actorType: "user" });
+    expect(afterSecond.state).toBe("in_review");
+  });
+
+  it("advanceCard rejects a card with no forward edge (terminal state)", async () => {
+    const cardId = await makeReadyCard("advance: terminal card");
+    await applyTransition({ cardId, toState: "cancelled", actorType: "user" });
+
+    await expect(advanceCard({ cardId, actorType: "user" })).rejects.toThrow(NoNextStateError);
+  });
+
+  // Regression: advanceCard used to resolve the forward edge by walking a
+  // fixed column-order list, which sent a blocked card to "done" -- not a
+  // legal TRANSITIONS edge, so it threw InvalidTransitionError instead of
+  // actually unblocking anything. It now resolves through NEXT_STATE
+  // (@loopeng/shared), an explicit per-state edge map, so this succeeds.
+  it("advanceCard routes a blocked card to ready, not done", async () => {
+    const cardId = await makeReadyCard("advance: blocked card");
+    await applyTransition({ cardId, toState: "in_progress", actorType: "agent" });
+    await applyTransition({ cardId, toState: "blocked", actorType: "automation", reason: "test" });
+
+    const updated = await advanceCard({ cardId, actorType: "user" });
+    expect(updated.state).toBe("ready");
   });
 });

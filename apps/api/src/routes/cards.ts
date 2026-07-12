@@ -1,13 +1,6 @@
 import type { FastifyPluginAsync } from "fastify";
 import { and, desc, eq } from "drizzle-orm";
-import {
-  advanceCardState,
-  applyTransition,
-  attachCardStatus,
-  CardNotFoundError,
-  TerminalColumnError,
-  wouldCreateCycle,
-} from "@loopeng/board-engine";
+import { advanceCard, applyTransition, attachCardStatus, wouldCreateCycle } from "@loopeng/board-engine";
 import { getSessionSnippet, sessionRegistry } from "@loopeng/agents";
 import { getActiveWorktree, getRepoDiff } from "@loopeng/worktree-manager";
 import {
@@ -185,31 +178,17 @@ export const cardRoutes: FastifyPluginAsync = async (fastify) => {
     reply.send(card);
   });
 
-  // Advances a card to the next column in the board's ordered column list
-  // (packages/shared BOARD_COLUMN_ORDER), through the same applyTransition
-  // path drag-and-drop uses -- so orchestrator triggers and card.moved
-  // history fire identically either way. No gating beyond what a drag would
-  // already allow: it just picks the next column for you. InvalidTransition/
-  // ConcurrentTransition errors (e.g. a card in a state whose array-adjacent
-  // "next" isn't actually a legal edge, or a concurrent mover) bubble to the
-  // same global error handler the /transition route relies on, so they come
-  // back as the same 409 either way.
+  // Backs the card detail page's "move to next step" button. Resolves the
+  // card's current state to its single forward edge server-side (see
+  // NEXT_STATE in @loopeng/shared) rather than trusting the client with a
+  // toState, through the same applyTransition path drag-and-drop uses -- so
+  // orchestrator triggers and card.moved history fire identically either
+  // way. CardNotFoundError/NoNextStateError/InvalidTransitionError/
+  // ConcurrentTransitionError all bubble to the global error handler.
   fastify.post("/cards/:id/advance", async (request, reply) => {
     const { id } = request.params as { id: string };
-    try {
-      const card = await advanceCardState({ cardId: id, actorType: "user" });
-      reply.send(card);
-    } catch (err) {
-      if (err instanceof CardNotFoundError) {
-        reply.status(404).send({ error: "not_found" });
-        return;
-      }
-      if (err instanceof TerminalColumnError) {
-        reply.status(409).send({ error: "terminal_column", message: err.message });
-        return;
-      }
-      throw err;
-    }
+    const card = await advanceCard({ cardId: id, actorType: "user" });
+    reply.send(card);
   });
 
   // Manual trigger for the Phase 2 autonomous loop — normally cron/event

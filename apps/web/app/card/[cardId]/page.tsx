@@ -17,8 +17,8 @@ import {
   flattenAgentRunTree,
 } from "@loopeng/ui";
 import {
+  getNextState,
   matchCriterionVerdicts,
-  nextBoardState,
   parseCriterionVerdicts,
   type GateResultStatus,
   type RiskTier,
@@ -562,7 +562,7 @@ export default function CardDetailPage({ params }: { params: Promise<{ cardId: s
           <StatusBadge status={card.state} className="rounded-[5px] px-2 py-[3px] font-mono text-[11px] font-bold" />
           <Button
             size="sm"
-            disabled={advancing || nextBoardState(card.state) === null}
+            disabled={advancing || getNextState(card.state) === null}
             onClick={advanceCard}
             className="rounded-[5px] px-2 py-[3px] font-mono text-[11px] font-bold"
           >

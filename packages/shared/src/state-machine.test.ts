@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { CARD_STATES } from "./enums";
-import { canTransition, TRANSITIONS } from "./state-machine";
+import type { CardState } from "./enums";
+import { canTransition, getNextState, NEXT_STATE, TRANSITIONS } from "./state-machine";
 
 describe("TRANSITIONS", () => {
   it("has an entry for every card state", () => {
@@ -57,5 +58,38 @@ describe("deploy_failed recovery", () => {
 
   it("does not let a deploy_failed card skip straight to done", () => {
     expect(canTransition("deploy_failed", "done")).toBe(false);
+  });
+});
+
+describe("getNextState", () => {
+  it("walks the happy path for the normal case", () => {
+    expect(getNextState("backlog")).toBe("ready");
+    expect(getNextState("in_progress")).toBe("in_review");
+  });
+
+  // Regression: an earlier version derived this by walking a fixed
+  // column-order list instead of an explicit per-state edge. That sent
+  // blocked -> done (not a legal TRANSITIONS edge -- throws at
+  // applyTransition time) and deploy_failed -> blocked (legal, but not the
+  // documented "retry just the deploy step" recovery path). Caught live by
+  // an integrator agent rebasing two independent implementations of the
+  // /advance endpoint.
+  it("routes blocked to ready, not to done", () => {
+    expect(getNextState("blocked")).toBe("ready");
+  });
+
+  it("routes deploy_failed to deploying (retry the deploy step), not to blocked", () => {
+    expect(getNextState("deploy_failed")).toBe("deploying");
+  });
+
+  it("every declared edge is a legal transition, by construction", () => {
+    for (const [from, to] of Object.entries(NEXT_STATE) as [CardState, CardState][]) {
+      expect(canTransition(from, to)).toBe(true);
+    }
+  });
+
+  it("returns null for terminal states and states with no declared forward edge", () => {
+    expect(getNextState("done")).toBeNull();
+    expect(getNextState("cancelled")).toBeNull();
   });
 });
