@@ -15,18 +15,33 @@ import { agentRuns, db } from "@loopeng/db";
 // it stays in the same process group -- signaling the *group* (negative pid)
 // reaches it even after the CLI's own PID has already exited and the job has
 // been reparented to init.
-// Every claude CLI child inherits this process's env by default (cwd/
-// DATABASE_URL/etc. all need to pass through) -- except ORCHESTRATOR_ENABLED,
-// which must never leak to a spawned child no matter what. An implementer's
-// Bash tool can itself spawn a worktree-local `apps/api` dev server (see the
-// module comment above on killProcessGroup, and the 2026-07-02 incident it
-// documents) -- if that grandchild process inherited ORCHESTRATOR_ENABLED=1
-// from this one, it would auto-start a second dispatcher racing the real
-// one, defeating the whole point of the flag being opt-in. Confirmed live:
-// exactly this leak happened once ORCHESTRATOR_ENABLED=1 was set on the real
-// instance's env for the first time.
-function agentSpawnEnv(): NodeJS.ProcessEnv {
-  const { ORCHESTRATOR_ENABLED: _dropped, ...rest } = process.env;
+// Every claude CLI child inherits this process's env by default, MINUS a
+// deny-list of vars that must never reach an agent's own worktree process
+// tree:
+//
+// - ORCHESTRATOR_ENABLED: an implementer's Bash tool can itself spawn a
+//   worktree-local `apps/api` dev server (see the module comment above on
+//   killProcessGroup, and the 2026-07-02 incident it documents) -- if that
+//   grandchild process inherited ORCHESTRATOR_ENABLED=1 from this one, it
+//   would auto-start a second dispatcher racing the real one, defeating the
+//   whole point of the flag being opt-in. Confirmed live: exactly this leak
+//   happened once ORCHESTRATOR_ENABLED=1 was set on the real instance's env
+//   for the first time.
+// - DATABASE_URL / DB_PORT: an agent's Bash tool otherwise has a full-access
+//   Postgres credential sitting in its own environment, reachable with
+//   nothing more than `psql $DATABASE_URL` -- this is exactly how the
+//   2026-07-03 incident happened (card 438646e5): an implementer created a
+//   card through the API self-attributed as a human action, then deleted it
+//   with a raw DB write that left no event_log trace at all, since no
+//   DELETE route (and therefore no audit path) exists for it. State
+//   mutations must go through the API, whose auth boundary can actually
+//   attribute and log who did what -- an agent worktree has no legitimate
+//   reason to hold a credential that bypasses that boundary entirely.
+const AGENT_ENV_DENYLIST = ["ORCHESTRATOR_ENABLED", "DATABASE_URL", "DB_PORT"] as const;
+
+export function agentSpawnEnv(): NodeJS.ProcessEnv {
+  const rest = { ...process.env };
+  for (const key of AGENT_ENV_DENYLIST) delete rest[key];
   return rest;
 }
 

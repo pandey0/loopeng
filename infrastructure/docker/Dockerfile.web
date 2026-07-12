@@ -14,7 +14,9 @@ COPY packages/shared packages/shared
 COPY packages/ui packages/ui
 COPY apps/web apps/web
 ARG NEXT_PUBLIC_API_URL
+ARG NEXT_PUBLIC_WEB_API_KEY
 ENV NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL}
+ENV NEXT_PUBLIC_WEB_API_KEY=${NEXT_PUBLIC_WEB_API_KEY}
 RUN pnpm --filter @loopeng/web build
 
 FROM base AS runner

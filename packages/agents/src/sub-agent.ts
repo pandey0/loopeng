@@ -73,7 +73,25 @@ export function buildSubAgentMcpConfig(ctx: SubAgentContext): Record<string, unk
           LOOPENG_CWD: ctx.cwd,
           LOOPENG_DELEGATION_DEPTH: String(ctx.depth),
           LOOPENG_DISALLOWED_TOOLS: (ctx.disallowedTools ?? []).join(","),
-          DATABASE_URL: process.env.DATABASE_URL ?? "",
+          // Deliberately NOT the full-access DATABASE_URL (card 438646e5):
+          // this subprocess still needs *some* connection -- it's what
+          // spawnSubAgent's own agent_runs bookkeeping and get_doc
+          // (packages/mcp-subagent/src/server.ts / doc-engine's getDoc,
+          // read-only) use via the plain @loopeng/db import -- but it gets
+          // it under the least-privilege loopeng_agent_runs role (see
+          // migrations 0011/0012: read/write agent_runs, read agent_roles
+          // and docs, nothing else) instead of unrestricted access to the
+          // shared database. Passed under the standard DATABASE_URL name so
+          // @loopeng/db's ordinary client picks it up transparently, same
+          // as every other caller of that package.
+          DATABASE_URL: process.env.AGENT_RUNS_DATABASE_URL ?? "",
+          // Also forwarded under its own name so that if *this* subprocess
+          // itself recurses (a sub-agent delegating to a sub-sub-agent, up
+          // to MAX_DELEGATION_DEPTH), the next buildSubAgentMcpConfig call
+          // -- running inside this subprocess, whose own DATABASE_URL is
+          // already the scoped value above, not the real env var name --
+          // can still read the scoped credential to thread through again.
+          AGENT_RUNS_DATABASE_URL: process.env.AGENT_RUNS_DATABASE_URL ?? "",
           // The MCP server subprocess is spawned by the `claude` CLI itself
           // per --mcp-config, not by us directly — whether it inherits our
           // process.env (vs. only the keys listed here) isn't something we

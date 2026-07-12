@@ -1,4 +1,4 @@
-import { afterAll, describe, expect, it } from "vitest";
+import { afterAll, afterEach, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
 import { agentRuns, db, pool } from "@loopeng/db";
 import { buildSubAgentMcpConfig, MAX_DELEGATION_DEPTH, spawnSubAgent, SubAgentDepthExceededError } from "./sub-agent.js";
@@ -30,6 +30,50 @@ describe("buildSubAgentMcpConfig", () => {
       LOOPENG_CWD: "/some/worktree/path",
       LOOPENG_DELEGATION_DEPTH: "1",
       LOOPENG_DISALLOWED_TOOLS: "Edit,Write",
+    });
+  });
+
+  // Regression test for card 438646e5: this subprocess used to be handed
+  // the real, full-access DATABASE_URL directly -- an agent worktree's own
+  // MCP server having unrestricted DB access is exactly the same class of
+  // gap as the incident's raw-DB delete, just one hop further from the
+  // agent's own Bash tool. It must only ever see the least-privilege
+  // loopeng_agent_runs credential (migrations 0011/0012), under the
+  // DATABASE_URL name so @loopeng/db's ordinary client picks it up.
+  describe("DATABASE_URL scoping", () => {
+    const original = process.env.AGENT_RUNS_DATABASE_URL;
+
+    afterEach(() => {
+      if (original === undefined) delete process.env.AGENT_RUNS_DATABASE_URL;
+      else process.env.AGENT_RUNS_DATABASE_URL = original;
+    });
+
+    it("never forwards the real DATABASE_URL, only the scoped AGENT_RUNS_DATABASE_URL", () => {
+      process.env.AGENT_RUNS_DATABASE_URL = "postgresql://loopeng_agent_runs:scoped-secret@postgres:5432/loopeng";
+
+      const config = buildSubAgentMcpConfig({
+        parentAgentRunId: "run-1",
+        cardId: null,
+        worktreeId: null,
+        cwd: "/repo",
+        depth: 1,
+      });
+      const env = (config as { mcpServers: { subagent: { env: Record<string, string> } } }).mcpServers.subagent.env;
+
+      expect(env.DATABASE_URL).toBe("postgresql://loopeng_agent_runs:scoped-secret@postgres:5432/loopeng");
+      expect(env.DATABASE_URL).not.toBe(process.env.DATABASE_URL);
+      // Forwarded under its own name too, so a sub-agent that itself
+      // recurses can still thread the scoped credential through again.
+      expect(env.AGENT_RUNS_DATABASE_URL).toBe(env.DATABASE_URL);
+    });
+
+    it("degrades to an empty (unusable, not full-access) credential when unset, never falling back to the real one", () => {
+      delete process.env.AGENT_RUNS_DATABASE_URL;
+
+      const config = buildSubAgentMcpConfig({ parentAgentRunId: "run-1", cardId: null, worktreeId: null, cwd: "/repo", depth: 1 });
+      const env = (config as { mcpServers: { subagent: { env: Record<string, string> } } }).mcpServers.subagent.env;
+
+      expect(env.DATABASE_URL).toBe("");
     });
   });
 

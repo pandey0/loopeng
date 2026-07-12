@@ -2,6 +2,8 @@ import Fastify, { type FastifyInstance } from "fastify";
 import { eq } from "drizzle-orm";
 import { boards, cardQuestions, cards, db, pool } from "@loopeng/db";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { authPlugin } from "../plugins/auth.js";
+import { authHeaderFor } from "../test-helpers/auth.js";
 import { cardRoutes } from "./cards.js";
 
 declare module "fastify" {
@@ -13,11 +15,15 @@ declare module "fastify" {
 describe("POST /cards/:id/questions/:questionId/answer", () => {
   let app: FastifyInstance;
   let boardId: string;
+  let authHeader: { Authorization: string };
 
   beforeAll(async () => {
     app = Fastify();
     app.decorate("db", db);
+    await app.register(authPlugin);
     await app.register(cardRoutes);
+
+    authHeader = await authHeaderFor("user");
 
     const [board] = await db.insert(boards).values({ name: "card-questions test board" }).returning({ id: boards.id });
     if (!board) throw new Error("board insert returned no row");
@@ -52,6 +58,7 @@ describe("POST /cards/:id/questions/:questionId/answer", () => {
     const response = await app.inject({
       method: "POST",
       url: `/cards/${cardId}/questions/${questionId}/answer`,
+      headers: authHeader,
       payload: { answer: "staging", answeredBy: "product-owner@example.com" },
     });
 
@@ -72,6 +79,7 @@ describe("POST /cards/:id/questions/:questionId/answer", () => {
     const first = await app.inject({
       method: "POST",
       url: `/cards/${cardId}/questions/${questionId}/answer`,
+      headers: authHeader,
       payload: { answer: "staging" },
     });
     expect(first.statusCode).toBe(200);
@@ -79,6 +87,7 @@ describe("POST /cards/:id/questions/:questionId/answer", () => {
     const second = await app.inject({
       method: "POST",
       url: `/cards/${cardId}/questions/${questionId}/answer`,
+      headers: authHeader,
       payload: { answer: "prod" },
     });
     expect(second.statusCode).toBe(409);
@@ -91,6 +100,7 @@ describe("POST /cards/:id/questions/:questionId/answer", () => {
     const response = await app.inject({
       method: "POST",
       url: `/cards/${otherCardId}/questions/${questionId}/answer`,
+      headers: authHeader,
       payload: { answer: "staging" },
     });
     expect(response.statusCode).toBe(404);

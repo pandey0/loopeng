@@ -2,7 +2,9 @@ import Fastify, { type FastifyInstance } from "fastify";
 import { eq } from "drizzle-orm";
 import { boards, cardDocLinks, cards, db, docs, pool } from "@loopeng/db";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
+import { authPlugin } from "../plugins/auth.js";
 import { errorHandlerPlugin } from "../plugins/error-handler.js";
+import { authHeaderFor } from "../test-helpers/auth.js";
 import { cardRoutes } from "./cards.js";
 
 declare module "fastify" {
@@ -19,13 +21,17 @@ describe("POST /cards mandates a spec doc", () => {
   let app: FastifyInstance;
   let boardId: string;
   let specDocId: string;
+  let authHeader: { Authorization: string };
   const createdCardIds: string[] = [];
 
   beforeAll(async () => {
     app = Fastify();
     app.decorate("db", db);
     await app.register(errorHandlerPlugin);
+    await app.register(authPlugin);
     await app.register(cardRoutes);
+
+    authHeader = await authHeaderFor("user");
 
     const [board] = await db.insert(boards).values({ name: "card-create test board" }).returning({ id: boards.id });
     if (!board) throw new Error("board insert returned no row");
@@ -56,6 +62,7 @@ describe("POST /cards mandates a spec doc", () => {
     const response = await app.inject({
       method: "POST",
       url: "/cards",
+      headers: authHeader,
       payload: { boardId, title: "no spec doc field" },
     });
     expect(response.statusCode).toBe(400);
@@ -65,6 +72,7 @@ describe("POST /cards mandates a spec doc", () => {
     const response = await app.inject({
       method: "POST",
       url: "/cards",
+      headers: authHeader,
       payload: { boardId, title: "fake spec doc", specDocId: "00000000-0000-0000-0000-000000000000" },
     });
     expect(response.statusCode).toBe(422);
@@ -75,6 +83,7 @@ describe("POST /cards mandates a spec doc", () => {
     const response = await app.inject({
       method: "POST",
       url: "/cards",
+      headers: authHeader,
       payload: { boardId, title: "real spec doc", specDocId },
     });
     expect(response.statusCode).toBe(201);

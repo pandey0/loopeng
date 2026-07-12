@@ -1,8 +1,10 @@
 import Fastify from "fastify";
 import websocketPlugin from "@fastify/websocket";
+import { ensureStaticApiKey } from "@loopeng/db";
 import { dbPlugin } from "./plugins/db.js";
 import { errorHandlerPlugin } from "./plugins/error-handler.js";
 import { corsPlugin } from "./plugins/cors.js";
+import { authPlugin } from "./plugins/auth.js";
 import { orchestratorPlugin } from "./plugins/orchestrator.js";
 import { healthRoutes } from "./routes/health.js";
 import { docRoutes } from "./routes/docs.js";
@@ -20,7 +22,18 @@ const fastify = Fastify({ logger: true });
 await fastify.register(corsPlugin);
 await fastify.register(dbPlugin);
 await fastify.register(errorHandlerPlugin);
+await fastify.register(authPlugin);
 await fastify.register(orchestratorPlugin);
+
+// Turns WEB_API_KEY into a verifiable "human" credential (see
+// ensureStaticApiKey) -- unset in a worktree-local dev API instance is fine
+// (mutating card routes just 401 until one is configured), but the one real
+// instance (docker-compose) always sets it so the web app's requests carry
+// verified actorType=user identity instead of the API trusting a
+// self-reported body field.
+if (process.env.WEB_API_KEY) {
+  await ensureStaticApiKey(process.env.WEB_API_KEY, { actorType: "user", label: "web-ui" });
+}
 await fastify.register(websocketPlugin);
 await fastify.register(healthRoutes);
 await fastify.register(docRoutes);

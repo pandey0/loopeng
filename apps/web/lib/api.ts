@@ -128,6 +128,19 @@ export interface CardDetail extends Card {
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
 
+// A single static credential shared by every browser session -- not a
+// per-user login (no such system exists yet, see ARCHITECTURE.md), but
+// enough to give the API a real, verifiable "this request came from the web
+// UI" identity (actorType=user) that an agent worktree's environment never
+// contains (see card 438646e5: an agent could previously self-report
+// actorType=user on any request body and the API just believed it). Baked
+// into the client bundle at build time like NEXT_PUBLIC_API_URL already is
+// -- this is a single-tenant, self-hosted internal tool (not a public-
+// internet multi-tenant service), so the trust boundary this closes is
+// "agent worktree env vars vs. the operator's own browser," not "arbitrary
+// internet user vs. authenticated user."
+const WEB_API_KEY = process.env.NEXT_PUBLIC_WEB_API_KEY ?? "";
+
 // Carries the parsed JSON error body (when the API sent one) alongside the
 // generic message, so callers that want to show the server's actual
 // validation/error message (e.g. the intake modal) don't have to re-parse it.
@@ -148,7 +161,11 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   // Content-Type: application/json but sends no body at all ("Body cannot
   // be empty...") -- a real bug this caught live: a body-less POST (e.g.
   // approve/reanalyze, no payload needed) always set this header anyway.
-  const headers = init?.body ? { "Content-Type": "application/json", ...init?.headers } : init?.headers;
+  const headers = {
+    ...(init?.body ? { "Content-Type": "application/json" } : {}),
+    ...(WEB_API_KEY ? { Authorization: `Bearer ${WEB_API_KEY}` } : {}),
+    ...init?.headers,
+  };
   const res = await fetch(`${API_URL}${path}`, { ...init, headers });
   if (!res.ok) {
     const text = await res.text();
@@ -210,7 +227,7 @@ export const api = {
   transitionCard: (id: string, toState: CardState) =>
     request<Card>(`/cards/${id}/transition`, {
       method: "POST",
-      body: JSON.stringify({ toState, actorType: "user" }),
+      body: JSON.stringify({ toState }),
     }),
   advanceCard: (id: string) => request<Card>(`/cards/${id}/advance`, { method: "POST" }),
   getCardDetail: (id: string) => request<CardDetail>(`/cards/${id}/detail`),

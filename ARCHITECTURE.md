@@ -145,5 +145,5 @@ Deploy pipeline (`runDeployPipeline` / `docker-compose.ts` provider) runs once a
 
 - Event-trigger cursor skips `ready`-transitions from before process boot (backlog `59b39294`).
 - A card stalled mid-`gate_checks` by a process restart has no automatic recovery path (needs its own backlog card).
-- Agents have unrestricted raw DB access with no actor authentication (backlog `438646e5`, deliberately deferred).
+- ~~Agents have unrestricted raw DB access with no actor authentication~~ -- fixed (backlog `438646e5`): agent-spawned processes no longer get `DATABASE_URL` at all (`agentSpawnEnv` in `@loopeng/agents`); the sub-agent MCP server gets a least-privilege `loopeng_agent_runs` role instead (migrations 0011/0012, scoped to `agent_runs`/`agent_roles`/`docs`); and card-mutating routes require a verified `api_keys` bearer token (`apps/api/src/plugins/auth.ts`), with `actorType`/`actorId` derived server-side from that token rather than trusted from the request body. Coverage is scoped to `/cards/*` (the incident's actual vector) -- `boards`/`projects`/`docs`/`intake` routes are still open and would need the same `requireActor` treatment in a follow-up.
 - Agents occasionally create their own scaffolding/verification cards as part of a task (e.g. "e2e: add a muted Badge variant") -- known, deliberately not suppressed.

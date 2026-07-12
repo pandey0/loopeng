@@ -261,10 +261,11 @@ export const IntakeInputSchema = z.object({
 });
 export type IntakeInput = z.infer<typeof IntakeInputSchema>;
 
+// actorType/actorId are deliberately NOT client input here (card 438646e5):
+// the API derives them server-side from the caller's verified API key
+// (see requireActor in apps/api), never from a self-reported body field.
 export const CardTransitionInputSchema = z.object({
   toState: z.enum(CARD_STATES),
-  actorType: z.enum(["user", "agent", "automation"]).default("user"),
-  actorId: uuid.optional(),
   // Recorded on the card.moved event itself -- the *only* place a reason
   // survives once the card leaves the state it explains (e.g. blockedReason
   // is derived live from current gate/agent-run rows, so it's gone the

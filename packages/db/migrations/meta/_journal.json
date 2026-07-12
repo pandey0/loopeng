@@ -78,6 +78,20 @@
       "when": 1783748142785,
       "tag": "0010_moaning_mindworm",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1783872076835,
+      "tag": "0011_add_api_keys",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1783872425266,
+      "tag": "0012_grant_agent_runs_docs_select",
+      "breakpoints": true
     }
   ]
 }

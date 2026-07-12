@@ -311,6 +311,25 @@ export const connectors = pgTable("connectors", {
   enabled: boolean("enabled").notNull().default(true),
 });
 
+// ===== API keys — verified caller identity for actorType attribution =====
+// One row per issued credential. tokenHash is sha256(raw token); the raw
+// token is only ever shown once (at mint time) and never stored. actorId is
+// polymorphic like event_log.actor_id above (no FK): for actorType='agent'
+// it's the agent_runs.id the key was scoped to; for actorType='user' it's
+// null (the web UI's single static bootstrap key -- see ensureStaticApiKey).
+export const apiKeys = pgTable("api_keys", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  tokenHash: text("token_hash").notNull().unique(),
+  actorType: text("actor_type").notNull(), // user | agent | automation
+  actorId: uuid("actor_id"),
+  label: text("label").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  // Set once (never un-set) so a key can be permanently retired -- e.g. when
+  // the agent run it was scoped to finishes -- without deleting the row and
+  // losing the audit trail of what that key was ever allowed to do.
+  revokedAt: timestamp("revoked_at", { withTimezone: true }),
+});
+
 // ===== Event log — the loop-engineering "memory" substrate =====
 export const eventLog = pgTable("event_log", {
   id: bigserial("id", { mode: "number" }).primaryKey(),
