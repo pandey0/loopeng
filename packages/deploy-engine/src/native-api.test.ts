@@ -40,7 +40,7 @@ describe("restartNativeApi", () => {
     expect(result.detail.newBootId).toBe("boot-new");
 
     const written = JSON.parse(await readFile(requestFile, "utf8"));
-    expect(written.token).toBe(result.detail.token);
+    expect(written.requestId).toBe(result.detail.requestId);
   });
 
   it("reports restarted:false when the bootId never changes before the timeout", async () => {

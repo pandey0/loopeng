@@ -43,7 +43,7 @@ export class NativeApiSupervisor {
   private readonly log: (msg: string) => void;
 
   private child: ChildProcess | null = null;
-  private lastSeenToken: string | null = null;
+  private lastSeenRequestId: string | null = null;
   private pollTimer: ReturnType<typeof setInterval> | null = null;
   private restarting = false;
   private stopped = false;
@@ -64,10 +64,10 @@ export class NativeApiSupervisor {
 
   async start(): Promise<void> {
     await mkdir(path.dirname(this.requestFile), { recursive: true });
-    // Adopt whatever restart token already exists so a supervisor restarted
+    // Adopt whatever restart requestId already exists so a supervisor restarted
     // itself doesn't immediately treat a stale, already-applied request as
     // new and restart the child it just spawned a second time.
-    this.lastSeenToken = await this.readRequestToken();
+    this.lastSeenRequestId = await this.readRequestId();
     this.spawnChild();
     this.pollTimer = setInterval(() => {
       this.pollForRestartRequest().catch((err) => this.log(`poll error: ${(err as Error).message}`));
@@ -80,11 +80,11 @@ export class NativeApiSupervisor {
     if (this.child) this.child.kill("SIGTERM");
   }
 
-  private async readRequestToken(): Promise<string | null> {
+  private async readRequestId(): Promise<string | null> {
     try {
       const raw = await readFile(this.requestFile, "utf8");
-      const parsed = JSON.parse(raw) as { token?: string };
-      return parsed.token ?? null;
+      const parsed = JSON.parse(raw) as { requestId?: string };
+      return parsed.requestId ?? null;
     } catch {
       return null;
     }
@@ -92,10 +92,10 @@ export class NativeApiSupervisor {
 
   private async pollForRestartRequest(): Promise<void> {
     if (this.stopped || this.restarting) return;
-    const token = await this.readRequestToken();
-    if (token && token !== this.lastSeenToken) {
-      this.lastSeenToken = token;
-      this.log(`restart requested (token=${token})`);
+    const requestId = await this.readRequestId();
+    if (requestId && requestId !== this.lastSeenRequestId) {
+      this.lastSeenRequestId = requestId;
+      this.log(`restart requested (requestId=${requestId})`);
       await this.restartChild();
     }
   }

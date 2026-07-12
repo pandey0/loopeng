@@ -74,9 +74,9 @@ describe("NativeApiSupervisor", () => {
     expect(spawned.length).toBe(1);
     const first = spawned[0]!;
 
-    await writeFile(requestFile, JSON.stringify({ token: "req-1", requestedAt: new Date().toISOString() }));
+    await writeFile(requestFile, JSON.stringify({ requestId: "req-1", requestedAt: new Date().toISOString() }));
 
-    // Give the poll loop a few ticks to pick up the new token and call
+    // Give the poll loop a few ticks to pick up the new requestId and call
     // terminate(), which is what actually sends SIGTERM.
     await new Promise((resolve) => setTimeout(resolve, 30));
     expect(first.killCalls).toContain("SIGTERM");
@@ -89,11 +89,11 @@ describe("NativeApiSupervisor", () => {
     expect(spawned.length).toBe(2);
   });
 
-  it("ignores a restart-request token it already applied (adopted on start)", async () => {
-    await writeFile(requestFile, JSON.stringify({ token: "already-applied", requestedAt: new Date().toISOString() }));
+  it("ignores a restart-request requestId it already applied (adopted on start)", async () => {
+    await writeFile(requestFile, JSON.stringify({ requestId: "already-applied", requestedAt: new Date().toISOString() }));
     await supervisor.start();
     await new Promise((resolve) => setTimeout(resolve, 30));
-    // Only the initial spawn -- the pre-existing token must not trigger a
+    // Only the initial spawn -- the pre-existing requestId must not trigger a
     // second restart immediately after boot.
     expect(spawned.length).toBe(1);
   });

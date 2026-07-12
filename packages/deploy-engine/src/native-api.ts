@@ -56,9 +56,9 @@ export async function restartNativeApi(opts: NativeApiRestartOptions): Promise<N
 
   const before = await probeHealth(opts.healthUrl, fetchImpl);
 
-  const token = randomUUID();
+  const requestId = randomUUID();
   await mkdir(path.dirname(requestFile), { recursive: true });
-  await writeFile(requestFile, JSON.stringify({ token, requestedAt: new Date().toISOString() }));
+  await writeFile(requestFile, JSON.stringify({ requestId, requestedAt: new Date().toISOString() }));
 
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
@@ -66,7 +66,7 @@ export async function restartNativeApi(opts: NativeApiRestartOptions): Promise<N
     if (after.ok && after.bootId && after.bootId !== before.bootId) {
       return {
         restarted: true,
-        detail: { token, previousBootId: before.bootId ?? null, newBootId: after.bootId, newBootedAt: after.bootedAt ?? null },
+        detail: { requestId, previousBootId: before.bootId ?? null, newBootId: after.bootId, newBootedAt: after.bootedAt ?? null },
       };
     }
     await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
@@ -75,7 +75,7 @@ export async function restartNativeApi(opts: NativeApiRestartOptions): Promise<N
   return {
     restarted: false,
     detail: {
-      token,
+      requestId,
       reason: "native api did not report a new bootId within timeout -- supervisor may not be running",
       previousBootId: before.bootId ?? null,
     },
