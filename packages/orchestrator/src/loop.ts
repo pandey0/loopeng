@@ -158,6 +158,18 @@ export async function orchestrateCard(cardId: string, hooks: HookRegistry): Prom
     const [currentCard] = await db.select().from(cards).where(eq(cards.id, cardId));
     if (!currentCard) throw new Error(`card disappeared mid-run: ${cardId}`);
 
+    // The first iteration always sees "in_progress" (just set above), but a
+    // retry (attempt > 1) re-reads whatever the card's state actually is
+    // right now -- if something outside this loop moved it off in_progress
+    // while the killed attempt's process was still winding down (a human
+    // stopping the run, another automation blocking the card), respect that
+    // instead of blindly spawning another implementer attempt against a
+    // card that already moved on. Without this, killing an agent run's
+    // process didn't actually stop the card: the loop would just retry.
+    if (currentCard.state !== "in_progress") {
+      return { status: "blocked", reason: `stopped: card is now "${currentCard.state}", not retrying` };
+    }
+
     const implResult = await runImplementerAgent(currentCard, priorFailureNote);
 
     // A QUESTION: escalation ends the turn deliberately — it is neither a

@@ -10,6 +10,7 @@ import {
   cardDocLinks,
   cardQuestions,
   cards,
+  db,
   docs,
   eventLog,
   gateDefinitions,
@@ -199,6 +200,44 @@ export const cardRoutes: FastifyPluginAsync = async (fastify) => {
     const { id } = request.params as { id: string };
     await fastify.orchestrator.coordination.dispatch(id);
     reply.status(202).send({ dispatched: id });
+  });
+
+  // Stops a card's live agent run right now and blocks the card, instead of
+  // waiting for the current attempt to finish naturally -- e.g. a human
+  // decides the foundation this run is building on needs fixing first (a
+  // design-review finding on a dependency) and doesn't want it to keep
+  // building on top of it. Blocks the card *before* closing the session, so
+  // the recorded reason is this one, not whatever error text a killed
+  // process happens to produce. Relies on the retry-loop guard in
+  // orchestrator/loop.ts (re-checks card.state at the top of every retry
+  // attempt) to make this stick -- without that guard, a still-in-flight
+  // attempt's own retry logic would just spawn another implementer call
+  // against a card that already moved off in_progress.
+  fastify.post("/cards/:id/stop", async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const [card] = await db.select().from(cards).where(eq(cards.id, id));
+    if (!card) {
+      reply.status(404).send({ error: "not_found" });
+      return;
+    }
+    if (card.state !== "in_progress") {
+      reply.status(409).send({ error: "not_running", message: `card is "${card.state}", not in_progress` });
+      return;
+    }
+
+    const input = request.body as { reason?: string } | undefined;
+    const reason = input?.reason?.trim() || "stopped by user";
+    await applyTransition({ cardId: id, toState: "blocked", actorType: "user", reason });
+
+    const [liveRun] = await db
+      .select({ id: agentRuns.id })
+      .from(agentRuns)
+      .where(and(eq(agentRuns.cardId, id), eq(agentRuns.status, "running")))
+      .orderBy(desc(agentRuns.startedAt))
+      .limit(1);
+    sessionRegistry.get(liveRun?.id ?? "")?.close();
+
+    reply.send({ stopped: id, hadLiveSession: Boolean(liveRun) });
   });
 
   // Human answers a card_questions escalation (spec: card-questions-escalation).
