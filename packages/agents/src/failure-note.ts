@@ -6,7 +6,7 @@
 const MAX_NOTE_LINES = 10;
 const MAX_LINE_LENGTH = 300;
 
-export type FailureKind = "implementer_error" | "review_rejected";
+export type FailureKind = "implementer_error" | "review_rejected" | "gates_failed";
 
 // The Claude CLI's own rate/session-limit message ("You've hit your session
 // limit · resets 1:40am (Asia/Kolkata)") is a real, observed error shape,
@@ -106,7 +106,12 @@ function truncateLine(line: string): string {
 }
 
 export function distillFailureNote(kind: FailureKind, resultText: string): string {
-  const header = kind === "implementer_error" ? "Implementer run failed." : "Reviewer rejected the previous attempt.";
+  const header =
+    kind === "implementer_error"
+      ? "Implementer run failed."
+      : kind === "gates_failed"
+        ? "Automated gate checks failed on the previous attempt."
+        : "Reviewer rejected the previous attempt.";
 
   const lines = resultText
     .split("\n")
