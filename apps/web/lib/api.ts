@@ -199,6 +199,7 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ toState, actorType: "user" }),
     }),
+  advanceCard: (id: string) => request<Card>(`/cards/${id}/advance`, { method: "POST" }),
   getCardDetail: (id: string) => request<CardDetail>(`/cards/${id}/detail`),
   getCardDiff: (id: string) => request<{ diff: string }>(`/cards/${id}/diff`),
   updateCard: (
