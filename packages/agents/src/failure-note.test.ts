@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { distillFailureNote, isRateLimitError } from "./failure-note.js";
+import { distillFailureNote, isRateLimitError, parseRateLimitResetAt } from "./failure-note.js";
 
 describe("distillFailureNote", () => {
   it("caps the note at 10 lines even for a huge rejection transcript", () => {
@@ -52,5 +52,34 @@ describe("isRateLimitError", () => {
 
   it("is false for a genuine review rejection", () => {
     expect(isRateLimitError("VERDICT: FAIL\nCRITERION: handles null email -> NOT SATISFIED")).toBe(false);
+  });
+});
+
+// Asia/Kolkata has a fixed UTC+5:30 offset (no DST), which makes these exact
+// -- picking a DST-observing zone would make the expected UTC instant depend
+// on which side of a transition referenceTime falls on.
+describe("parseRateLimitResetAt", () => {
+  it("resolves today's occurrence when the reset clock time is still ahead of referenceTime", () => {
+    // referenceTime = 2026-07-13T00:30 IST -- 1:40am IST that same day is
+    // still ahead of it.
+    const referenceTime = new Date("2026-07-12T19:00:00.000Z");
+    const resetAt = parseRateLimitResetAt("You've hit your session limit · resets 1:40am (Asia/Kolkata)", referenceTime);
+    expect(resetAt?.toISOString()).toBe("2026-07-12T20:10:00.000Z");
+  });
+
+  it("rolls over to tomorrow's occurrence once the reset clock time has already passed", () => {
+    // referenceTime = 2026-07-13T02:30 IST -- 1:40am IST that day already
+    // passed, so the next real occurrence is the following day.
+    const referenceTime = new Date("2026-07-12T21:00:00.000Z");
+    const resetAt = parseRateLimitResetAt("You've hit your session limit · resets 1:40am (Asia/Kolkata)", referenceTime);
+    expect(resetAt?.toISOString()).toBe("2026-07-13T20:10:00.000Z");
+  });
+
+  it("returns null when the text has no recognizable reset clause", () => {
+    expect(parseRateLimitResetAt("TypeError: cannot read property 'foo' of undefined")).toBeNull();
+  });
+
+  it("returns null when the timezone name isn't real, instead of throwing", () => {
+    expect(parseRateLimitResetAt("You've hit your session limit · resets 1:40am (Not/AZone)")).toBeNull();
   });
 });

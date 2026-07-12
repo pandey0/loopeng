@@ -3,7 +3,7 @@ import { db } from "@loopeng/db";
 import { agentRoles, agentRuns, cards, eventLog } from "@loopeng/db";
 import { applyTransition } from "@loopeng/board-engine";
 import type { CardState } from "@loopeng/shared";
-import { RATE_LIMIT_BACKOFF_MS, RATE_LIMIT_MARKER, scheduleRateLimitRetry } from "./loop.js";
+import { RATE_LIMIT_MARKER, resolveRateLimitRetryAt, scheduleRateLimitRetryAt } from "./loop.js";
 
 // States where a card's next move is genuinely owned by an in-flight agent
 // run -- not awaiting_approval (no run is active by definition, a human owns
@@ -102,21 +102,28 @@ export async function reconcileOrphanedRuns(): Promise<number> {
   return latestByCard.size;
 }
 
-// scheduleRateLimitRetry (loop.ts) arms a bare setTimeout the moment a card
-// is blocked for a rate limit -- nothing persists *when* it's due, so an api
-// restart before it fires (deploy, crash, dev-loop restart) drops the
-// pending requeue silently and the card is stuck in "blocked" forever, with
-// its blockedReason (buildBlockedReasonMap) never even surfacing the
-// rate-limit prose since that reason only lives on the card.moved event, not
-// on any row buildBlockedReasonMap reads. Recorded live on 2026-07-12: two
-// cards blocked for a session-limit reset sat well past their own stated
-// "~20 min" window with no further activity after an unrelated api restart.
+// scheduleRateLimitRetryAt (loop.ts) arms a bare setTimeout the moment a
+// card is blocked for a rate limit -- nothing persists *when* it's due, so
+// an api restart before it fires (deploy, crash, dev-loop restart, or the
+// whole machine being shut down overnight) drops the pending requeue
+// silently and the card is stuck in "blocked" forever, with its
+// blockedReason (buildBlockedReasonMap) never even surfacing the rate-limit
+// prose since that reason only lives on the card.moved event, not on any
+// row buildBlockedReasonMap reads. Recorded live on 2026-07-12: two cards
+// blocked for a session-limit reset sat well past their own stated window
+// with no further activity after an unrelated api restart.
 //
 // Runs once at boot, same as reconcileOrphanedRuns: sweep blocked cards
-// whose most recent card.moved event is a rate-limit block, and either
-// requeue immediately (if the backoff window already elapsed -- the common
-// case after any outage that takes more than a few minutes to notice and
-// recover from) or re-arm a timer for whatever's left of it.
+// whose most recent card.moved event is a rate-limit block, and re-derive
+// the *same* target instant resolveRateLimitRetryAt originally computed --
+// by re-parsing the "resets HH:MM (Zone)" clause preserved verbatim in the
+// persisted reason, using that event's own createdAt as the reference time
+// (so "next occurrence on/after the block" reproduces the original target
+// regardless of how much later this sweep actually runs). Comparing that
+// fixed target against the real current time is what makes this correct no
+// matter how long the process was gone -- an hour, or the machine being
+// closed overnight -- either it's overdue (requeue immediately) or it
+// isn't (re-arm a timer for what's left).
 export async function reconcileRateLimitedCards(): Promise<number> {
   const blocked = await db.select({ id: cards.id }).from(cards).where(eq(cards.state, "blocked"));
   if (blocked.length === 0) return 0;
@@ -134,9 +141,8 @@ export async function reconcileRateLimitedCards(): Promise<number> {
     const payload = latestMove.payload as { to?: string; reason?: string };
     if (payload.to !== "blocked" || !payload.reason?.startsWith(RATE_LIMIT_MARKER)) continue;
 
-    const elapsedMs = Date.now() - latestMove.createdAt.getTime();
-    const remainingMs = RATE_LIMIT_BACKOFF_MS - elapsedMs;
-    if (remainingMs <= 0) {
+    const retryAt = resolveRateLimitRetryAt(payload.reason, latestMove.createdAt);
+    if (retryAt.getTime() <= Date.now()) {
       await applyTransition({
         cardId: card.id,
         toState: "ready",
@@ -145,7 +151,7 @@ export async function reconcileRateLimitedCards(): Promise<number> {
       });
       requeued++;
     } else {
-      scheduleRateLimitRetry(card.id, remainingMs);
+      scheduleRateLimitRetryAt(card.id, retryAt);
     }
   }
 

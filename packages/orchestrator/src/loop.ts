@@ -7,6 +7,7 @@ import {
   distillFailureNote,
   hasDesignerSpecDoc,
   isRateLimitError,
+  parseRateLimitResetAt,
   resolveQuestionRouting,
   runDesignerReviewAgent,
   runDesignerSpecAgent,
@@ -27,7 +28,19 @@ const MAX_ATTEMPTS = 3;
 // genuine rejection. Blocks the card (visible, honest reason -- see
 // isAutoRetrying) without touching the attempt counter, and schedules a
 // real retry later instead of leaving it for a human to notice and requeue.
+//
+// Only a fallback now -- see resolveRateLimitRetryAt below. Kept because the
+// CLI's own message is free-text ("You've hit your session limit · resets
+// 1:40am (Asia/Kolkata)"); if its shape ever changes and
+// parseRateLimitResetAt can't find a reset clause, retrying blind in 20
+// minutes is still better than blocking the card for a human forever.
 export const RATE_LIMIT_BACKOFF_MS = Number(process.env.ORCHESTRATOR_RATE_LIMIT_BACKOFF_MS ?? 20 * 60 * 1000);
+
+// Grace period past the account's own stated reset instant -- usage counters
+// don't always clear exactly on the second, and retrying right at the edge
+// risks reading the same still-active limit and burning the retry for
+// nothing.
+const RATE_LIMIT_RETRY_BUFFER_MS = 60 * 1000;
 
 // Prefix marker on the card.moved reason recorded by blockForRateLimit --
 // stable across the actual minutes-remaining prose, so reconcile.ts can
@@ -36,11 +49,28 @@ export const RATE_LIMIT_BACKOFF_MS = Number(process.env.ORCHESTRATOR_RATE_LIMIT_
 // RESTART_ORPHAN_MARKER in reconcile.ts).
 export const RATE_LIMIT_MARKER = "rate-limited, not a real failure";
 
-// Exported so reconcile.ts can re-arm a timer for the *remaining* backoff
-// after a process restart, instead of only ever scheduling the full
-// RATE_LIMIT_BACKOFF_MS from now -- see scheduleRateLimitRetry's own
-// setTimeout for why a restart drops this silently otherwise.
-export function scheduleRateLimitRetry(cardId: string, delayMs: number = RATE_LIMIT_BACKOFF_MS): void {
+// Regression: this used to always schedule a fixed 20-minute retry
+// regardless of what the CLI's own message said -- so a card blocked near
+// the *start* of a session window ("resets 12:40am", hours away) still
+// retried every 20 minutes, hit the same limit each time, and displayed a
+// "retrying in ~20 min" reason that had nothing to do with when the account
+// would actually be usable again. Parses the real reset instant out of the
+// message instead (parseRateLimitResetAt), so the schedule -- and the
+// reason text shown on the card -- both reflect reality. Exported so
+// reconcile.ts can re-derive the same target instant from a persisted
+// reason string.
+export function resolveRateLimitRetryAt(resultText: string, referenceTime: Date = new Date()): Date {
+  const resetAt = parseRateLimitResetAt(resultText, referenceTime);
+  if (resetAt) return new Date(resetAt.getTime() + RATE_LIMIT_RETRY_BUFFER_MS);
+  return new Date(referenceTime.getTime() + RATE_LIMIT_BACKOFF_MS);
+}
+
+// Exported so reconcile.ts can re-arm a timer for a re-derived retryAt after
+// a process restart, instead of only ever scheduling relative to "now" --
+// see scheduleRateLimitRetryAt's own setTimeout for why a restart drops this
+// silently otherwise.
+export function scheduleRateLimitRetryAt(cardId: string, retryAt: Date): void {
+  const delayMs = Math.max(retryAt.getTime() - Date.now(), 0);
   setTimeout(() => {
     applyTransition({
       cardId,
@@ -48,18 +78,19 @@ export function scheduleRateLimitRetry(cardId: string, delayMs: number = RATE_LI
       actorType: "automation",
       reason: "auto-retrying after rate-limit backoff",
     }).catch((err) => console.error(`[orchestrator] rate-limit retry requeue failed for card ${cardId}`, err));
-  }, Math.max(delayMs, 0)).unref();
+  }, delayMs).unref();
 }
 
 async function blockForRateLimit(cardId: string, resultText: string): Promise<void> {
-  const minutes = Math.round(RATE_LIMIT_BACKOFF_MS / 60000);
+  const retryAt = resolveRateLimitRetryAt(resultText);
+  const minutes = Math.max(1, Math.round((retryAt.getTime() - Date.now()) / 60000));
   await applyTransition({
     cardId,
     toState: "blocked",
     actorType: "automation",
     reason: `${RATE_LIMIT_MARKER} — retrying automatically in ~${minutes} min: ${resultText.slice(0, 300)}`,
   });
-  scheduleRateLimitRetry(cardId);
+  scheduleRateLimitRetryAt(cardId, retryAt);
 }
 
 // Kept short: card_questions.question stores the full text, this is only

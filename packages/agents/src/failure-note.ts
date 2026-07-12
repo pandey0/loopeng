@@ -25,6 +25,82 @@ export function isRateLimitError(resultText: string): boolean {
   return RATE_LIMIT_MARKERS.some((marker) => lower.includes(marker));
 }
 
+// Matches the "resets 1:40am (Asia/Kolkata)" clause in the real CLI message
+// above -- a daily wall-clock moment, never a date, since the message never
+// says which day it means.
+const RESET_TIME_PATTERN = /resets\s+(\d{1,2}):(\d{2})\s*(am|pm)\s*\(([^)]+)\)/i;
+
+function timeZonePartsAt(date: Date, timeZone: string): { year: number; month: number; day: number } {
+  const dtf = new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  });
+  const parts = Object.fromEntries(dtf.formatToParts(date).map((p) => [p.type, p.value]));
+  return { year: Number(parts.year), month: Number(parts.month), day: Number(parts.day) };
+}
+
+// Resolves "hh:mm in timeZone, on this (year, month, day)" to the UTC instant
+// it names. A plain Date.UTC(...) guess is off by whatever timeZone's offset
+// is at that moment; one correction pass against Intl's own read of that
+// guess is exact except in the instant of a DST transition, which is an
+// acceptable gap for a retry-scheduling heuristic.
+function zonedTimeToUtc(year: number, month: number, day: number, hour: number, minute: number, timeZone: string): Date {
+  const guess = Date.UTC(year, month - 1, day, hour, minute, 0);
+  const dtf = new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    hour12: false,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  });
+  const parts = Object.fromEntries(dtf.formatToParts(new Date(guess)).map((p) => [p.type, p.value]));
+  const asIfUtc = Date.UTC(
+    Number(parts.year),
+    Number(parts.month) - 1,
+    Number(parts.day),
+    Number(parts.hour) % 24,
+    Number(parts.minute),
+    Number(parts.second),
+  );
+  return new Date(guess - (asIfUtc - guess));
+}
+
+// Parses the real reset instant out of the CLI's rate-limit message, instead
+// of the caller guessing at a fixed backoff -- see loop.ts's
+// RATE_LIMIT_BACKOFF_MS comment for why a fixed 20-minute retry against an
+// account that resets hours from now just burns another attempt into the
+// same wall. Returns the next occurrence of that wall-clock time on or after
+// referenceTime (today's if still ahead, otherwise tomorrow's), or null if
+// the text doesn't contain a recognizable "resets HH:MM(am|pm) (Zone)"
+// clause -- callers fall back to a fixed backoff in that case.
+export function parseRateLimitResetAt(resultText: string, referenceTime: Date = new Date()): Date | null {
+  const match = resultText.match(RESET_TIME_PATTERN);
+  if (!match) return null;
+  const [, hourStr, minuteStr, meridiem, timeZone] = match;
+
+  let hour = Number(hourStr) % 12;
+  if (meridiem?.toLowerCase() === "pm") hour += 12;
+  const minute = Number(minuteStr);
+
+  let today: { year: number; month: number; day: number };
+  try {
+    today = timeZonePartsAt(referenceTime, timeZone!);
+  } catch {
+    return null; // timeZone wasn't a real IANA name -- don't guess
+  }
+
+  let target = zonedTimeToUtc(today.year, today.month, today.day, hour, minute, timeZone!);
+  if (target.getTime() <= referenceTime.getTime()) {
+    target = zonedTimeToUtc(today.year, today.month, today.day + 1, hour, minute, timeZone!);
+  }
+  return target;
+}
+
 function truncateLine(line: string): string {
   return line.length > MAX_LINE_LENGTH ? `${line.slice(0, MAX_LINE_LENGTH)}…` : line;
 }
