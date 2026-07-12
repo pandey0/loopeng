@@ -14,6 +14,7 @@ import { StagePipelineBar } from "./StagePipelineBar";
 import { AgentSessionDrawer } from "./AgentSessionDrawer";
 import { ShortcutsHelpDialog } from "./ShortcutsHelpDialog";
 import { useBoardKeyboardShortcuts } from "./useBoardKeyboardShortcuts";
+import { filterCardsByTitle, hasNoMatches } from "./titleSearch";
 
 const HIGHLIGHT_DURATION_MS = 4000;
 // While anything is actively running, poll listCards so the board tile's
@@ -71,8 +72,8 @@ function BoardPageInner() {
   });
 
   const cards = cardsQuery.data ?? [];
-  const trimmedQuery = titleQuery.trim().toLowerCase();
-  const visibleCards = trimmedQuery ? cards.filter((c) => c.title.toLowerCase().includes(trimmedQuery)) : cards;
+  const visibleCards = filterCardsByTitle(cards, titleQuery);
+  const noMatches = hasNoMatches(titleQuery, visibleCards);
   const flatCards = PHASE_3_COLUMN_STATES.flatMap((state) => visibleCards.filter((c) => c.state === state));
   const { focusedCardId, shortcutsOpen, closeShortcuts } = useBoardKeyboardShortcuts(flatCards, setApprovalCardId, () =>
     searchInputRef.current?.focus(),
@@ -188,8 +189,11 @@ function BoardPageInner() {
           )}
         </div>
         <div className="flex min-h-0 min-w-0 flex-1 gap-3 p-4">
-          {trimmedQuery && visibleCards.length === 0 ? (
-            <div className="flex min-w-0 flex-1 items-start justify-center pt-10 text-sm text-muted-foreground">
+          {noMatches ? (
+            <div
+              role="status"
+              className="flex min-w-0 flex-1 items-start justify-center pt-10 text-sm text-muted-foreground"
+            >
               No cards match &ldquo;{titleQuery.trim()}&rdquo;.
             </div>
           ) : (
