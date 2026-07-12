@@ -10,13 +10,14 @@ export interface BoardKeyboardShortcuts {
 }
 
 // j/k move focus through the flattened, column-ordered card list; a
-// approves the focused card if it's actually approvable; ? toggles the
-// shortcuts help dialog. Pure client interaction over the existing
-// transitionCard/approve flow -- no new mutation path, just keyboard
-// triggers for the buttons that already exist.
+// approves the focused card if it's actually approvable; / focuses the
+// title search box; ? toggles the shortcuts help dialog. Pure client
+// interaction over the existing transitionCard/approve flow -- no new
+// mutation path, just keyboard triggers for the buttons that already exist.
 export function useBoardKeyboardShortcuts(
   flatCards: CardWithStatus[],
   onApproveFocused: (cardId: string) => void,
+  onFocusSearch: () => void,
 ): BoardKeyboardShortcuts {
   const [focusedCardId, setFocusedCardId] = useState<string | null>(null);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
@@ -26,6 +27,11 @@ export function useBoardKeyboardShortcuts(
       const target = e.target as HTMLElement | null;
       if (target && TYPING_TAGS.has(target.tagName)) return;
 
+      if (e.key === "/") {
+        e.preventDefault();
+        onFocusSearch();
+        return;
+      }
       if (e.key === "?") {
         setShortcutsOpen((v) => !v);
         return;
@@ -52,7 +58,7 @@ export function useBoardKeyboardShortcuts(
 
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [flatCards, focusedCardId, onApproveFocused]);
+  }, [flatCards, focusedCardId, onApproveFocused, onFocusSearch]);
 
   return { focusedCardId, shortcutsOpen, closeShortcuts: () => setShortcutsOpen(false) };
 }
