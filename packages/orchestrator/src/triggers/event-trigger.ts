@@ -7,12 +7,23 @@ import type { CoordinationStrategy } from "../coordination/types.js";
 
 const POLL_INTERVAL_MS = Number(process.env.ORCHESTRATOR_EVENT_POLL_MS ?? 5000);
 
-// Every card that has a "blocks" dependency on `doneCardId` and is still
-// sitting in backlog: promote it to ready if that was its last unmet
-// blocker. A card can depend on more than one other card, so this re-checks
-// isReady() per dependent rather than assuming clearing one edge clears the
-// card -- only promotes when every blocker is actually done.
-async function promoteUnblockedDependents(doneCardId: string): Promise<void> {
+// Every card that has a "blocks" dependency on `doneCardId`: promote it to
+// ready if that was its last unmet blocker (backlog case), or dispatch it
+// directly if it's already sitting in ready (a human -- or a stale board
+// state -- can put a card in ready before its dependency actually finished;
+// its own ready-transition event would have found isReady() false back
+// then and skipped dispatch, and nothing else was ever going to re-check it
+// once this dependency actually landed). A card can depend on more than one
+// other card, so this re-checks isReady() per dependent rather than
+// assuming clearing one edge clears the card -- only acts once every
+// blocker is actually done.
+//
+// Regression: a card manually dragged to ready ahead of its dependency
+// finishing sat there forever even after the dependency reached done --
+// this only ever promoted backlog cards, silently ignoring ready ones.
+// Caught live: a card moved to ready before its blocker merged never
+// kicked off even once the blocker was done.
+export async function promoteUnblockedDependents(doneCardId: string, coordination: CoordinationStrategy): Promise<void> {
   const dependents = await db
     .select({ cardId: cardDependencies.cardId, state: cards.state })
     .from(cardDependencies)
@@ -20,14 +31,24 @@ async function promoteUnblockedDependents(doneCardId: string): Promise<void> {
     .where(and(eq(cardDependencies.dependsOnCardId, doneCardId), eq(cardDependencies.dependencyType, "blocks")));
 
   for (const dependent of dependents) {
-    if (dependent.state !== "backlog") continue;
+    if (dependent.state !== "backlog" && dependent.state !== "ready") continue;
     if (!(await isReady(dependent.cardId))) continue;
-    await applyTransition({
-      cardId: dependent.cardId,
-      toState: "ready",
-      actorType: "automation",
-      reason: `auto-promoted: its last unmet dependency (${doneCardId}) reached done`,
-    });
+
+    if (dependent.state === "backlog") {
+      await applyTransition({
+        cardId: dependent.cardId,
+        toState: "ready",
+        actorType: "automation",
+        reason: `auto-promoted: its last unmet dependency (${doneCardId}) reached done`,
+      });
+      continue;
+    }
+
+    // Already in ready -- no transition to make, just dispatch it now
+    // instead of leaving it for a boot sweep or cron triage to find.
+    await coordination
+      .dispatch(dependent.cardId)
+      .catch((err) => console.error("[orchestrator:event-trigger] dependent dispatch failed", err));
   }
 }
 
@@ -96,7 +117,7 @@ export function startEventTrigger(coordination: CoordinationStrategy): () => voi
           // isReady() (checked per-dependent, since one might have other
           // still-unmet blockers) then lets the normal ready-dispatch branch
           // above pick it up on a later tick, same path a human drag takes.
-          await promoteUnblockedDependents(row.entityId).catch((err) =>
+          await promoteUnblockedDependents(row.entityId, coordination).catch((err) =>
             console.error("[orchestrator:event-trigger] dependent promotion failed", err),
           );
         }
