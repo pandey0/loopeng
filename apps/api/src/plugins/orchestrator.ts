@@ -21,33 +21,46 @@ declare module "fastify" {
 // default -- a worktree process would have to have ORCHESTRATOR_ENABLED=1
 // explicitly and deliberately set in its env for this to recur.
 export const orchestratorPlugin: FastifyPluginAsync = fp(async (fastify) => {
-  // Runs unconditionally, even on a worktree-local/dispatch-disabled boot:
-  // this is data hygiene ("that run died, the card lied about being
-  // in_progress"), not dispatch authority. Gating it behind
-  // ORCHESTRATOR_ENABLED too meant the one instance most likely to inherit
-  // an orphan from a *previous* run (a dev box being restarted repeatedly)
-  // was also the one instance where the sweep silently never ran.
+  if (process.env.ORCHESTRATOR_ENABLED !== "1") {
+    fastify.log.warn("ORCHESTRATOR_ENABLED is not set to \"1\" -- cron/event dispatch triggers are not running");
+    return;
+  }
+
+  // Both reconcile sweeps used to run unconditionally, ahead of this check,
+  // on the theory that they're data hygiene ("that run died, the card lied
+  // about being in_progress") rather than dispatch authority -- so a
+  // worktree-local/dispatch-disabled boot should still get the benefit.
+  // That was wrong: reconcileOrphanedRuns can't tell "a run whose owning
+  // process really did crash" from "a run that's alive right now under a
+  // *different, currently-running* process" -- it only looks at
+  // agent_runs.status against the shared DB, with no visibility into any
+  // other process's in-memory sessionRegistry. A worktree is a full copy of
+  // this code pointed at the same DATABASE_URL (see the comment above), so
+  // an agent's own worktree booting a dev server for verification would run
+  // this sweep, see its *own still-running* implementer run as "orphaned"
+  // (nothing about the row looks different from a real orphan), mark it
+  // failed, and yank the card back to "ready" out from under the real agent
+  // mid-run. Confirmed live on 2026-07-12: 8 of these false-orphan events
+  // across 2 days of history, each on a card with a genuinely live run --
+  // card 005c04ae's implementer kept working and finished normally 4
+  // minutes after being wrongly marked orphaned, then hit
+  // "InvalidTransitionError: cannot transition card from ready to
+  // in_review" because reconcile had already reset its card state.
+  // ORCHESTRATOR_ENABLED is already the exact opt-in boundary that keeps a
+  // worktree copy from racing the real instance on dispatch -- reusing it
+  // here closes this the same way, at the cost of the one real instance
+  // needing ORCHESTRATOR_ENABLED=1 for this sweep to run, which it always
+  // does (see start-api.sh).
   const reconciled = await reconcileOrphanedRuns();
   if (reconciled > 0) {
     fastify.log.warn(`reconciled ${reconciled} card(s) orphaned by a prior process restart -> blocked`);
   }
 
-  // Same data-hygiene reasoning as reconcileOrphanedRuns above: a rate-limit
-  // retry timer lives only in the process that scheduled it, so any restart
-  // between the block and the retry firing strands the card in "blocked"
-  // forever with no other trigger to move it. Unconditional for the same
-  // reason -- the dev box most likely to inherit a stranded rate-limit
-  // block from a *previous* run is also the one where gating this behind
-  // ORCHESTRATOR_ENABLED would mean it never runs.
   const requeued = await reconcileRateLimitedCards();
   if (requeued > 0) {
     fastify.log.warn(`requeued ${requeued} card(s) stranded by a rate-limit timer lost to a prior process restart`);
   }
 
-  if (process.env.ORCHESTRATOR_ENABLED !== "1") {
-    fastify.log.warn("ORCHESTRATOR_ENABLED is not set to \"1\" -- cron/event dispatch triggers are not running");
-    return;
-  }
   const orchestrator = await startOrchestrator();
   fastify.decorate("orchestrator", orchestrator);
   fastify.addHook("onClose", async () => {
