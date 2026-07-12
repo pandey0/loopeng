@@ -138,6 +138,7 @@ export const STATUS_META: Record<StatusKey, StatusMeta> = {
   // DeployStatus (pending/deploying/failed shared above)
   live: meta("Live", "success", CheckIcon),
   rolled_back: meta("Rolled Back", "warning", CrossIcon),
+  crashed: meta("Crashed", "destructive", CrossIcon),
 };
 
 export function getStatusMeta(key: StatusKey): StatusMeta {
