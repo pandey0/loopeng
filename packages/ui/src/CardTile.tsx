@@ -2,7 +2,7 @@ import type { Card, CardWithStatus } from "@loopeng/shared";
 import { cn } from "./lib/utils";
 import { LiveIndicator } from "./components/live-indicator";
 import { getStatusMeta } from "./lib/status";
-import { isHumanBlocked } from "./lib/blocked-reason";
+import { isAutoRetrying, isHumanBlocked } from "./lib/blocked-reason";
 
 const RISK_DOT_CLASS: Record<Card["riskTier"], string> = {
   low: "bg-success",
@@ -37,6 +37,7 @@ export function CardTile({ card, draggable = true, highlighted = false, focused 
   const activeAgentRun = card.activeAgentRun ?? null;
   const isActive = activeAgentRun !== null;
   const humanBlocked = isHumanBlocked(card.blockedReason);
+  const autoRetrying = isAutoRetrying(card.blockedReason);
   return (
     <div
       draggable={draggable}
@@ -91,7 +92,7 @@ export function CardTile({ card, draggable = true, highlighted = false, focused 
         >
           {humanBlocked ? "⚠" : "⏳"} {card.blockedReason}
           <div className="mt-0.5 font-mono text-[9.5px] opacity-75">
-            {humanBlocked ? "needs a human" : "auto-retries when unblocked"}
+            {humanBlocked ? "needs a human" : autoRetrying ? "not a real failure — retrying automatically" : "needs a fix, then Retry"}
           </div>
         </div>
       )}

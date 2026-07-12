@@ -31,6 +31,25 @@ async function promoteUnblockedDependents(doneCardId: string): Promise<void> {
   }
 }
 
+// Boot-time cursor init (below) sets lastId to whatever's already in
+// event_log, so any card.moved-to-ready event OLDER than that -- including
+// one from a card that was never actually dispatched, because the process
+// restarted before its tick ran -- becomes invisible to the poll loop
+// forever. Confirmed live: two real cards sat in "ready" for hours,
+// silently never picked up, purely because their ready-transition predated
+// a later boot. This sweeps current state instead of past events: any card
+// sitting in ready right now gets the same isReady()-gated dispatch a fresh
+// event would, once per boot, so a restart can never strand a ready card
+// indefinitely (only the once-daily cron morning-triage would otherwise
+// catch it).
+async function sweepReadyCardsAtBoot(coordination: CoordinationStrategy): Promise<void> {
+  const readyCards = await db.select({ id: cards.id }).from(cards).where(eq(cards.state, "ready"));
+  for (const card of readyCards) {
+    if (!(await isReady(card.id))) continue;
+    await coordination.dispatch(card.id).catch((err) => console.error("[orchestrator:event-trigger] boot sweep dispatch failed", err));
+  }
+}
+
 // Polls event_log rather than using Postgres LISTEN/NOTIFY — simpler to run
 // inside the same process as the Fastify API without managing a second raw
 // connection, and event_log is the durable substrate anyway so polling
@@ -91,6 +110,7 @@ export function startEventTrigger(coordination: CoordinationStrategy): () => voi
   void (async () => {
     const [latest] = await db.select().from(eventLog).orderBy(desc(eventLog.id)).limit(1);
     lastId = latest?.id ?? 0;
+    await sweepReadyCardsAtBoot(coordination).catch((err) => console.error("[orchestrator:event-trigger] boot sweep failed", err));
     void tick();
   })();
 
