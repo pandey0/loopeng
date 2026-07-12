@@ -87,6 +87,7 @@ export const DEPLOY_STATUSES = [
   "live",
   "rolled_back",
   "failed",
+  "crashed",
 ] as const;
 export type DeployStatus = (typeof DEPLOY_STATUSES)[number];
 
