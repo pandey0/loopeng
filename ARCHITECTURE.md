@@ -131,7 +131,7 @@ Gate pipeline (`runGatePipeline`, called from the orchestrator loop at `gate_che
 
 Deploy pipeline (`runDeployPipeline` / `docker-compose.ts` provider) runs once a card reaches `deploying`: checks the target repo is on the expected base branch and clean (refuses with a clear `detail.reason` like `"repo has uncommitted changes, refusing to merge"` otherwise -- a deliberate safety check, not a bug), merges the worktree branch with `--no-ff`, rebuilds and redeploys the `web` container via `docker compose ... --build web`, health-checks it, and either tears the worktree down as `merged` (-> card `done`) or rolls back to the pre-merge commit and blocks the card for a human.
 
-**Important asymmetry**: `COMPOSE_SERVICES` defaults to `["web"]` only -- the native `api` process is deliberately excluded (documented in code) because it needs live git/docker/claude-CLI access a container image doesn't have. This means code changes to `apps/api` or any package it depends on take effect only after someone manually restarts the native process; the deploy pipeline never does this automatically (tracked as backlog card `6d4dc01a`).
+**Important asymmetry**: `COMPOSE_SERVICES` defaults to `["web"]` only -- the native `api` process is deliberately excluded (documented in code) because it needs live git/docker/claude-CLI access a container image doesn't have. Since the native process can't be rebuilt-and-swapped the way `web`'s container is, the deploy pipeline instead restarts it explicitly: `native-api.ts` requests a restart via a file `native-api-supervisor.ts` watches (a small standalone process that owns the actual `pnpm --filter @loopeng/api run start` child, SIGTERM+respawn), then polls `/health` until it reports a new `bootId` -- proof a fresh process actually took over, not just that the old one is still answering (a plain DB-connectivity check can't tell the difference, which is exactly how card `6d4dc01a`'s 3-day-stale-api incident went unnoticed). The supervisor runs as its own OS process, separate from the api process it supervises, so a deploy triggered from inside that api process's own orchestrator never has to SIGTERM itself mid-deploy.
 
 ## 7. Live visibility features
 
@@ -144,7 +144,6 @@ Deploy pipeline (`runDeployPipeline` / `docker-compose.ts` provider) runs once a
 ## 8. Known architectural gaps (tracked, not yet fixed)
 
 - Event-trigger cursor skips `ready`-transitions from before process boot (backlog `59b39294`).
-- Native `api` process is never restarted by the deploy pipeline (backlog `6d4dc01a`).
 - A card stalled mid-`gate_checks` by a process restart has no automatic recovery path (needs its own backlog card).
 - Agents have unrestricted raw DB access with no actor authentication (backlog `438646e5`, deliberately deferred).
 - Agents occasionally create their own scaffolding/verification cards as part of a task (e.g. "e2e: add a muted Badge variant") -- known, deliberately not suppressed.
