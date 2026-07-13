@@ -17,13 +17,34 @@ async function recordRepoValidGate(cardId: string, passed: boolean, detail: Reco
   await db.insert(gateResults).values({ cardId, gateDefinitionId: gateDef.id, status: passed ? "passed" : "failed", detail });
 }
 
-async function recordDeployLiveGate(cardId: string, passed: boolean, detail: Record<string, unknown>) {
+// Health dashboard (apps/api/src/routes/deploys.ts) reads deploy_live
+// gate_results as its only source of "recent deploy attempts", including
+// in-progress ones -- so a deploy's lifecycle must show up as a "running" row
+// the moment it starts, not just as a passed/failed row once it finishes.
+async function recordDeployLiveGate(
+  cardId: string,
+  status: "running" | "passed" | "failed",
+  detail: Record<string, unknown>,
+): Promise<string | undefined> {
   const [gateDef] = await db.select().from(gateDefinitions).where(eq(gateDefinitions.key, "deploy_live"));
   if (!gateDef) {
     console.warn("[deploy-engine] deploy_live gate_definition not seeded, skipping gate_results row");
-    return;
+    return undefined;
   }
-  await db.insert(gateResults).values({ cardId, gateDefinitionId: gateDef.id, status: passed ? "passed" : "failed", detail });
+  const [row] = await db.insert(gateResults).values({ cardId, gateDefinitionId: gateDef.id, status, detail }).returning({ id: gateResults.id });
+  return row?.id;
+}
+
+async function finishDeployLiveGate(gateResultId: string | undefined, status: "passed" | "failed", detail: Record<string, unknown>): Promise<void> {
+  // gateResultId is undefined only when the gate_definition wasn't seeded --
+  // recordDeployLiveGate already warned about that, nothing to update here.
+  if (!gateResultId) return;
+  // computeBlockedReasons (board-engine/card-status.ts) and the health
+  // dashboard both order gate_results by createdAt desc to find the most
+  // recent outcome -- bump it here so it reflects when the deploy actually
+  // resolved, not when the "running" row was first inserted (which could be
+  // long before, for a slow deploy).
+  await db.update(gateResults).set({ status, detail, createdAt: new Date() }).where(eq(gateResults.id, gateResultId));
 }
 
 export interface DeployPipelineResult {
@@ -48,10 +69,30 @@ async function reconcileCrashedDeploys(cardId: string): Promise<void> {
     .returning({ id: deployRecords.id });
 
   if (stale.length > 0) {
-    await recordDeployLiveGate(cardId, false, {
+    const detail = {
       reason: "recovered from a crashed deploy attempt (process died mid-deploy, holding no lock)",
       crashedDeployRecordIds: stale.map((r) => r.id),
-    });
+    };
+
+    // The crashed attempt's own deploy_live gate_results row (inserted as
+    // "running" when it started) never got a terminal update -- finalize it
+    // in place, the same way a normal finish does, instead of inserting a
+    // second row for the same attempt (which would show one crashed deploy
+    // as two separate "recent attempts" on the health dashboard).
+    const [gateDef] = await db.select().from(gateDefinitions).where(eq(gateDefinitions.key, "deploy_live"));
+    const updated = gateDef
+      ? await db
+          .update(gateResults)
+          .set({ status: "failed", detail, createdAt: new Date() })
+          .where(and(eq(gateResults.cardId, cardId), eq(gateResults.gateDefinitionId, gateDef.id), eq(gateResults.status, "running")))
+          .returning({ id: gateResults.id })
+      : [];
+
+    // No "running" row to finalize (gate wasn't seeded when the crashed
+    // attempt started) -- still record the failure so it's not lost.
+    if (updated.length === 0) {
+      await recordDeployLiveGate(cardId, "failed", detail);
+    }
   }
 }
 
@@ -107,7 +148,7 @@ export async function runDeployPipeline(cardId: string, provider: DeployProvider
       .insert(deployRecords)
       .values({ cardId, environment: "production", status: "failed", startedAt: new Date(), finishedAt: new Date() })
       .returning();
-    await recordDeployLiveGate(cardId, false, { reason: err.message, deployRecordId: deployRecord?.id });
+    await recordDeployLiveGate(cardId, "failed", { reason: err.message, deployRecordId: deployRecord?.id });
     await applyTransition({ cardId, toState: "deploy_failed", actorType: "automation", reason: err.message });
     return { status: "deploy_failed" };
   }
@@ -128,6 +169,11 @@ export async function runDeployPipeline(cardId: string, provider: DeployProvider
       .returning();
     if (!deployRecord) throw new Error("failed to insert deploy_records row");
 
+    // Written before provider.deploy() runs (which can take a while) so the
+    // health dashboard shows this attempt as "running" for its whole
+    // duration instead of only appearing once it's already finished.
+    const deployLiveGateResultId = await recordDeployLiveGate(cardId, "running", { deployRecordId: deployRecord.id });
+
     const ctx = { card, worktree, repoRoot, baseBranch };
     const result = await provider.deploy(ctx);
 
@@ -143,7 +189,7 @@ export async function runDeployPipeline(cardId: string, provider: DeployProvider
         })
         .where(eq(deployRecords.id, deployRecord.id));
 
-      await recordDeployLiveGate(cardId, true, result.detail);
+      await finishDeployLiveGate(deployLiveGateResultId, "passed", result.detail);
       await applyTransition({ cardId, toState: "done", actorType: "automation" });
       await teardownWorktree(worktree.id, "merged");
       return { status: "done" };
@@ -184,7 +230,7 @@ export async function runDeployPipeline(cardId: string, provider: DeployProvider
         .where(eq(deployRecords.id, deployRecord.id));
     }
 
-    await recordDeployLiveGate(cardId, false, { deployFailure: result.detail, rollback: rollbackDetail });
+    await finishDeployLiveGate(deployLiveGateResultId, "failed", { deployFailure: result.detail, rollback: rollbackDetail });
     await applyTransition({
       cardId,
       toState: "deploy_failed",

@@ -1,4 +1,13 @@
-import type { Board, Card, CardDependency, CardState, CardWithStatus, Doc, Project } from "@loopeng/shared";
+import type { Board, Card, CardDependency, CardState, CardWithStatus, Doc, GateResultStatus, Project } from "@loopeng/shared";
+
+export interface DeployAttempt {
+  id: string;
+  status: GateResultStatus;
+  detail: Record<string, unknown>;
+  createdAt: string;
+  card: { id: string; title: string };
+  board: { id: string; name: string } | null;
+}
 
 export interface CardDetailDocLink {
   docId: string;
@@ -243,6 +252,8 @@ export const api = {
     return request<ActivityEvent[]>(`/events${query ? `?${query}` : ""}`);
   },
   eventsStreamUrl: (boardId?: string) => `${API_URL}/events/stream${boardId ? `?boardId=${boardId}` : ""}`,
+
+  listDeploys: (limit?: number) => request<DeployAttempt[]>(`/deploys${limit ? `?limit=${limit}` : ""}`),
   // WebSocket bridge onto an agent run (card C): live runs replay-then-stream
   // and accept input; completed runs stream the persisted transcript and close.
   agentRunSocketUrl: (agentRunId: string) =>

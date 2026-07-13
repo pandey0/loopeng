@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { simpleGit } from "simple-git";
 import { eq } from "drizzle-orm";
-import { boards, cards, db, deployRecords, gateResults, pool, projects, worktrees } from "@loopeng/db";
+import { boards, cards, db, deployRecords, gateDefinitions, gateResults, pool, projects, worktrees } from "@loopeng/db";
 import { afterAll, describe, expect, it } from "vitest";
 import { runDeployPipeline } from "./pipeline.js";
 import type { DeployProvider } from "./types.js";
@@ -67,6 +67,20 @@ describe("runDeployPipeline (crash recovery)", () => {
       .returning({ id: deployRecords.id });
     if (!staleRecord) throw new Error("stale deploy_records insert returned no row");
 
+    // The crashed process would also have written a deploy_live gate_results
+    // row as "running" right before it died -- simulate that orphan too, so
+    // this test covers both halves of the crash leftover, not just
+    // deploy_records. Without reconciliation this would sit as "running"
+    // forever and the health dashboard would show a dead deploy as still
+    // in-progress.
+    const [gateDef] = await db.select().from(gateDefinitions).where(eq(gateDefinitions.key, "deploy_live"));
+    if (!gateDef) throw new Error("deploy_live gate_definition not seeded -- run `pnpm --filter @loopeng/db seed` first");
+    const [orphanedGateResult] = await db
+      .insert(gateResults)
+      .values({ cardId: card.id, gateDefinitionId: gateDef.id, status: "running", detail: { deployRecordId: staleRecord.id } })
+      .returning({ id: gateResults.id });
+    if (!orphanedGateResult) throw new Error("orphaned gate_results insert returned no row");
+
     const provider: DeployProvider = {
       key: "fake-crash-recovery-test",
       async deploy(ctx) {
@@ -101,6 +115,12 @@ describe("runDeployPipeline (crash recovery)", () => {
     const recoveryGate = cardGateResults.find((g) => JSON.stringify(g.detail).includes("recovered from a crashed deploy attempt"));
     expect(recoveryGate).toBeDefined();
     expect((recoveryGate?.detail as { crashedDeployRecordIds?: string[] })?.crashedDeployRecordIds).toContain(staleRecord.id);
+
+    // The orphaned "running" row left by the crashed attempt is no longer
+    // lying about being in-progress either -- it's flipped to a terminal
+    // status, not left stuck.
+    const orphanAfter = cardGateResults.find((g) => g.id === orphanedGateResult.id);
+    expect(orphanAfter?.status).toBe("failed");
 
     const [cardAfter] = await db.select().from(cards).where(eq(cards.id, card.id));
     expect(cardAfter?.state).toBe("done");
