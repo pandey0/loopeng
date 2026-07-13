@@ -39,7 +39,12 @@ async function finishDeployLiveGate(gateResultId: string | undefined, status: "p
   // gateResultId is undefined only when the gate_definition wasn't seeded --
   // recordDeployLiveGate already warned about that, nothing to update here.
   if (!gateResultId) return;
-  await db.update(gateResults).set({ status, detail }).where(eq(gateResults.id, gateResultId));
+  // computeBlockedReasons (board-engine/card-status.ts) and the health
+  // dashboard both order gate_results by createdAt desc to find the most
+  // recent outcome -- bump it here so it reflects when the deploy actually
+  // resolved, not when the "running" row was first inserted (which could be
+  // long before, for a slow deploy).
+  await db.update(gateResults).set({ status, detail, createdAt: new Date() }).where(eq(gateResults.id, gateResultId));
 }
 
 export interface DeployPipelineResult {
@@ -64,21 +69,29 @@ async function reconcileCrashedDeploys(cardId: string): Promise<void> {
     .returning({ id: deployRecords.id });
 
   if (stale.length > 0) {
-    await recordDeployLiveGate(cardId, "failed", {
+    const detail = {
       reason: "recovered from a crashed deploy attempt (process died mid-deploy, holding no lock)",
       crashedDeployRecordIds: stale.map((r) => r.id),
-    });
+    };
 
     // The crashed attempt's own deploy_live gate_results row (inserted as
-    // "running" when it started) never got a terminal update -- without this
-    // it would sit as "running" forever and the health dashboard would show
-    // a deploy as perpetually in-progress.
+    // "running" when it started) never got a terminal update -- finalize it
+    // in place, the same way a normal finish does, instead of inserting a
+    // second row for the same attempt (which would show one crashed deploy
+    // as two separate "recent attempts" on the health dashboard).
     const [gateDef] = await db.select().from(gateDefinitions).where(eq(gateDefinitions.key, "deploy_live"));
-    if (gateDef) {
-      await db
-        .update(gateResults)
-        .set({ status: "failed", detail: { reason: "orphaned by a crashed deploy attempt, recovered on next run" } })
-        .where(and(eq(gateResults.cardId, cardId), eq(gateResults.gateDefinitionId, gateDef.id), eq(gateResults.status, "running")));
+    const updated = gateDef
+      ? await db
+          .update(gateResults)
+          .set({ status: "failed", detail, createdAt: new Date() })
+          .where(and(eq(gateResults.cardId, cardId), eq(gateResults.gateDefinitionId, gateDef.id), eq(gateResults.status, "running")))
+          .returning({ id: gateResults.id })
+      : [];
+
+    // No "running" row to finalize (gate wasn't seeded when the crashed
+    // attempt started) -- still record the failure so it's not lost.
+    if (updated.length === 0) {
+      await recordDeployLiveGate(cardId, "failed", detail);
     }
   }
 }
