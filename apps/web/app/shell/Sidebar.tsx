@@ -13,6 +13,7 @@ const NAV_ITEMS = [
   { href: "/plan", label: "Plan", icon: "💬" },
   { href: "/docs", label: "Docs", icon: "📄" },
   { href: "/activity", label: "Activity", icon: "📶" },
+  { href: "/health", label: "Health", icon: "❤️" },
 ] as const;
 
 function NavRow({
