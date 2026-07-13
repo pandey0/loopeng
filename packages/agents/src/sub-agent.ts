@@ -44,6 +44,20 @@ export interface SubAgentContext {
 // running module is necessarily loaded from a worktree that has these files (it IS
 // these files), so walking up from its own path always lands on the sibling
 // mcp-subagent package in the same worktree/checkout that's actually executing.
+// Same local-dev fallback the loopeng_agent_runs role's own migration
+// (0011) and its regression test (packages/db/src/agent-runs-role.test.ts)
+// use, and the same pattern @loopeng/db's own client.ts falls back to for
+// DATABASE_URL -- a worktree that never got AGENT_RUNS_DATABASE_URL
+// exported into its env otherwise silently threads an empty string through
+// as the sub-agent MCP server's DATABASE_URL, which fails SASL auth with a
+// confusing "password must be a string" error instead of ever reaching
+// Postgres.
+const AGENT_RUNS_DATABASE_URL_DEFAULT = "postgresql://loopeng_agent_runs:loopeng_agent_runs_dev@localhost:5433/loopeng";
+
+function agentRunsDatabaseUrl(): string {
+  return process.env.AGENT_RUNS_DATABASE_URL ?? AGENT_RUNS_DATABASE_URL_DEFAULT;
+}
+
 function subAgentServerEntrypoint(): { command: string; args: string[] } {
   const thisDir = path.dirname(fileURLToPath(import.meta.url));
   // packages/agents/src -> packages/mcp-subagent
@@ -84,14 +98,14 @@ export function buildSubAgentMcpConfig(ctx: SubAgentContext): Record<string, unk
           // shared database. Passed under the standard DATABASE_URL name so
           // @loopeng/db's ordinary client picks it up transparently, same
           // as every other caller of that package.
-          DATABASE_URL: process.env.AGENT_RUNS_DATABASE_URL ?? "",
+          DATABASE_URL: agentRunsDatabaseUrl(),
           // Also forwarded under its own name so that if *this* subprocess
           // itself recurses (a sub-agent delegating to a sub-sub-agent, up
           // to MAX_DELEGATION_DEPTH), the next buildSubAgentMcpConfig call
           // -- running inside this subprocess, whose own DATABASE_URL is
           // already the scoped value above, not the real env var name --
           // can still read the scoped credential to thread through again.
-          AGENT_RUNS_DATABASE_URL: process.env.AGENT_RUNS_DATABASE_URL ?? "",
+          AGENT_RUNS_DATABASE_URL: agentRunsDatabaseUrl(),
           // The MCP server subprocess is spawned by the `claude` CLI itself
           // per --mcp-config, not by us directly — whether it inherits our
           // process.env (vs. only the keys listed here) isn't something we

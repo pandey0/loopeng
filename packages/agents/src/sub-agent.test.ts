@@ -67,13 +67,15 @@ describe("buildSubAgentMcpConfig", () => {
       expect(env.AGENT_RUNS_DATABASE_URL).toBe(env.DATABASE_URL);
     });
 
-    it("degrades to an empty (unusable, not full-access) credential when unset, never falling back to the real one", () => {
+    it("degrades to the scoped loopeng_agent_runs local-dev default when unset, never falling back to the real DATABASE_URL", () => {
       delete process.env.AGENT_RUNS_DATABASE_URL;
+      process.env.DATABASE_URL = "postgresql://loopeng:full-access-secret@postgres:5432/loopeng";
 
       const config = buildSubAgentMcpConfig({ parentAgentRunId: "run-1", cardId: null, worktreeId: null, cwd: "/repo", depth: 1 });
       const env = (config as { mcpServers: { subagent: { env: Record<string, string> } } }).mcpServers.subagent.env;
 
-      expect(env.DATABASE_URL).toBe("");
+      expect(env.DATABASE_URL).toBe("postgresql://loopeng_agent_runs:loopeng_agent_runs_dev@localhost:5433/loopeng");
+      expect(env.DATABASE_URL).not.toBe(process.env.DATABASE_URL);
     });
   });
 
