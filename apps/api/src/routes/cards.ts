@@ -38,7 +38,13 @@ export const cardRoutes: FastifyPluginAsync = async (fastify) => {
     return attachCardStatus(cardRows, { isRunLive, getSnippet: getSessionSnippet });
   });
 
-  fastify.post("/cards", { preHandler: fastify.requireActor }, async (request, reply) => {
+  // Human-only (card 438646e5): a new card has no existing owner to scope an
+  // agent credential to, so it's board-shaping in the same sense boards/
+  // projects/docs creation is -- this is also the exact route the
+  // 2026-07-03 incident abused (an implementer minting an unrelated card to
+  // "prove" an acceptance criterion). requireOwnCard can't help here since
+  // there's no :id yet to check against the caller's run.
+  fastify.post("/cards", { preHandler: fastify.requireHumanActor }, async (request, reply) => {
     const { specDocId, ...cardInput } = CardCreateInputSchema.parse(request.body);
     const actor = request.actor!;
 

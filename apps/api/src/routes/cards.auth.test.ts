@@ -75,14 +75,34 @@ describe("card mutation routes: verified actor identity", () => {
     expect(after).toHaveLength(before.length);
   });
 
-  it("attributes a card created by an agent-scoped key as actorType=agent in event_log, not user", async () => {
+  it("403s a card creation attempt by an agent-scoped key -- card creation is human-only, and creates nothing", async () => {
     const agentHeader = await authHeaderFor("agent", fakeAgentRunId);
+    const before = await db.select().from(cards).where(eq(cards.boardId, boardId));
 
     const response = await app.inject({
       method: "POST",
       url: "/cards",
       headers: agentHeader,
+      // Reproduces the 2026-07-03 incident's exact move: an agent minting a
+      // brand-new, unrelated card. This must now be rejected outright, not
+      // merely attributed correctly -- a new card has no existing owner to
+      // scope an agent credential to.
       payload: { boardId, title: "agent-created card", specDocId },
+    });
+
+    expect(response.statusCode).toBe(403);
+    const after = await db.select().from(cards).where(eq(cards.boardId, boardId));
+    expect(after).toHaveLength(before.length);
+  });
+
+  it("attributes a card created by a verified human caller as actorType=user in event_log", async () => {
+    const humanHeader = await authHeaderFor("user");
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/cards",
+      headers: humanHeader,
+      payload: { boardId, title: "human-created card", specDocId },
     });
 
     expect(response.statusCode).toBe(201);
@@ -93,7 +113,7 @@ describe("card mutation routes: verified actor identity", () => {
       .select()
       .from(eventLog)
       .where(and(eq(eventLog.entityId, card.id), eq(eventLog.eventType, "card.created")));
-    expect(createdEvent).toMatchObject({ actorType: "agent", actorId: fakeAgentRunId });
+    expect(createdEvent).toMatchObject({ actorType: "user" });
   });
 
   it("ignores a forged actorType in the transition body -- the event is attributed to the verified caller, not the claim", async () => {
