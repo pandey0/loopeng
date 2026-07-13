@@ -4,6 +4,7 @@ import { HierarchicalStrategy } from "./coordination/hierarchical.js";
 import type { CoordinationStrategy } from "./coordination/types.js";
 import { startCronTriggers } from "./triggers/cron-trigger.js";
 import { startEventTrigger } from "./triggers/event-trigger.js";
+import { startRateLimitReconcileLoop } from "./reconcile.js";
 
 export * from "./hooks.js";
 export * from "./loop.js";
@@ -12,7 +13,7 @@ export * from "./router.js";
 export * from "./coordination/types.js";
 export { HierarchicalStrategy } from "./coordination/hierarchical.js";
 export { MeshStrategy } from "./coordination/mesh.js";
-export { reconcileOrphanedRuns, reconcileRateLimitedCards } from "./reconcile.js";
+export { reconcileOrphanedRuns, reconcileRateLimitedCards, startRateLimitReconcileLoop } from "./reconcile.js";
 
 export interface Orchestrator {
   coordination: CoordinationStrategy;
@@ -45,12 +46,18 @@ export async function startOrchestrator(): Promise<Orchestrator> {
 
   startCronTriggers(coordination);
   const stopEventTrigger = startEventTrigger(coordination);
+  // Backstop for a rate-limit block's own scheduleRateLimitRetryAt timer --
+  // see reconcile.ts's comment on reconcileRateLimitedCards for why a single
+  // in-memory timer, however long-lived, can't be the only thing standing
+  // between a card and being stuck in "blocked" for hours.
+  const stopRateLimitReconcile = startRateLimitReconcileLoop();
 
   return {
     coordination,
     hooks,
     stop: async () => {
       stopEventTrigger();
+      stopRateLimitReconcile();
       await coordination.stop();
     },
   };

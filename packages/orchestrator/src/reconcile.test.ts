@@ -1,7 +1,7 @@
 import { eq } from "drizzle-orm";
 import { boards, cards, db, eventLog, pool, projects } from "@loopeng/db";
 import { afterAll, describe, expect, it } from "vitest";
-import { reconcileRateLimitedCards } from "./reconcile.js";
+import { reconcileRateLimitedCards, startRateLimitReconcileLoop } from "./reconcile.js";
 import { RATE_LIMIT_MARKER } from "./loop.js";
 
 // Formats a "resets H:MMam/pm (Zone)" clause the same shape as the real
@@ -107,5 +107,37 @@ describe("reconcileRateLimitedCards", () => {
 
     const [cardAfter] = await db.select().from(cards).where(eq(cards.id, cardId));
     expect(cardAfter?.state).toBe("blocked");
+  });
+
+  // Regression coverage for the 2026-07-13 incident: seven cards blocked for
+  // a rate limit sat 80+ minutes overdue in a process that never restarted --
+  // scheduleRateLimitRetryAt's own setTimeout silently never fired, for a
+  // reason never fully pinned down. The fix wasn't to debug that one timer
+  // harder; it was to stop depending on any single timer firing at all.
+  // startRateLimitReconcileLoop is a self-rescheduling poll (same shape as
+  // triggers/event-trigger.ts) that calls reconcileRateLimitedCards on a
+  // short interval -- this proves the loop itself actually ticks and
+  // requeues, independent of whatever scheduleRateLimitRetryAt does.
+  it("startRateLimitReconcileLoop requeues an overdue card on its own, without relying on scheduleRateLimitRetryAt", async () => {
+    const originalPollMs = process.env.ORCHESTRATOR_RATE_LIMIT_POLL_MS;
+    process.env.ORCHESTRATOR_RATE_LIMIT_POLL_MS = "30";
+
+    const resetClause = formatResetClause(new Date(Date.now() - 5 * 60 * 1000));
+    const cardId = await makeBlockedCard(
+      "loop-requeued overdue block",
+      10 * 60 * 1000,
+      `${RATE_LIMIT_MARKER} — retrying automatically in ~5 min: You've hit your session limit · ${resetClause}`,
+    );
+
+    const stop = startRateLimitReconcileLoop();
+    try {
+      await new Promise((resolve) => setTimeout(resolve, 150));
+      const [cardAfter] = await db.select().from(cards).where(eq(cards.id, cardId));
+      expect(cardAfter?.state).toBe("ready");
+    } finally {
+      stop();
+      if (originalPollMs === undefined) delete process.env.ORCHESTRATOR_RATE_LIMIT_POLL_MS;
+      else process.env.ORCHESTRATOR_RATE_LIMIT_POLL_MS = originalPollMs;
+    }
   });
 });

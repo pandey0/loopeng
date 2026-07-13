@@ -3,7 +3,7 @@ import { db } from "@loopeng/db";
 import { agentRoles, agentRuns, cards, eventLog } from "@loopeng/db";
 import { applyTransition } from "@loopeng/board-engine";
 import type { CardState } from "@loopeng/shared";
-import { RATE_LIMIT_MARKER, resolveRateLimitRetryAt, scheduleRateLimitRetryAt } from "./loop.js";
+import { RATE_LIMIT_MARKER, resolveRateLimitRetryAt } from "./loop.js";
 
 // States where a card's next move is genuinely owned by an in-flight agent
 // run -- not awaiting_approval (no run is active by definition, a human owns
@@ -103,27 +103,30 @@ export async function reconcileOrphanedRuns(): Promise<number> {
 }
 
 // scheduleRateLimitRetryAt (loop.ts) arms a bare setTimeout the moment a
-// card is blocked for a rate limit -- nothing persists *when* it's due, so
-// an api restart before it fires (deploy, crash, dev-loop restart, or the
-// whole machine being shut down overnight) drops the pending requeue
-// silently and the card is stuck in "blocked" forever, with its
-// blockedReason (buildBlockedReasonMap) never even surfacing the rate-limit
-// prose since that reason only lives on the card.moved event, not on any
-// row buildBlockedReasonMap reads. Recorded live on 2026-07-12: two cards
-// blocked for a session-limit reset sat well past their own stated window
-// with no further activity after an unrelated api restart.
+// card is blocked for a rate limit -- a fast path for the common case, but
+// not something this function depends on. Recorded live on 2026-07-13:
+// seven cards blocked for a session-limit reset sat 80+ minutes past their
+// own stated retry time, in the *same continuously-running process* that
+// scheduled them (no restart, no gap between process uptime and wall-clock
+// elapsed time -- ruled out by comparing /proc's process start time against
+// the block events' timestamps). The exact reason a single long-duration
+// setTimeout silently failed to fire was never pinned down, and doesn't need
+// to be: relying on any one in-memory timer firing correctly, across
+// however many hours a session-limit window can run, is inherently fragile.
+// This function is the actual correctness guarantee -- called from
+// startRateLimitReconcileLoop below on a short interval, so a single dead
+// timer, a process restart, or the machine being shut down overnight all
+// self-heal within one poll instead of depending on any timer at all.
 //
-// Runs once at boot, same as reconcileOrphanedRuns: sweep blocked cards
-// whose most recent card.moved event is a rate-limit block, and re-derive
-// the *same* target instant resolveRateLimitRetryAt originally computed --
-// by re-parsing the "resets HH:MM (Zone)" clause preserved verbatim in the
-// persisted reason, using that event's own createdAt as the reference time
-// (so "next occurrence on/after the block" reproduces the original target
-// regardless of how much later this sweep actually runs). Comparing that
-// fixed target against the real current time is what makes this correct no
-// matter how long the process was gone -- an hour, or the machine being
-// closed overnight -- either it's overdue (requeue immediately) or it
-// isn't (re-arm a timer for what's left).
+// Sweep blocked cards whose most recent card.moved event is a rate-limit
+// block, and re-derive the target instant resolveRateLimitRetryAt originally
+// computed -- by re-parsing the "resets HH:MM (Zone)" clause preserved
+// verbatim in the persisted reason, using that event's own createdAt as the
+// reference time (so "next occurrence on/after the block" reproduces the
+// original target regardless of how much later this sweep actually runs).
+// Comparing that fixed target against the real current time is what makes
+// this correct no matter how long it's been -- requeue if overdue, otherwise
+// leave it for the next poll to re-check.
 export async function reconcileRateLimitedCards(): Promise<number> {
   const blocked = await db.select({ id: cards.id }).from(cards).where(eq(cards.state, "blocked"));
   if (blocked.length === 0) return 0;
@@ -147,13 +150,44 @@ export async function reconcileRateLimitedCards(): Promise<number> {
         cardId: card.id,
         toState: "ready",
         actorType: "automation",
-        reason: "auto-retrying after rate-limit backoff (requeued at boot -- the original timer was lost to a process restart)",
+        reason: "auto-retrying after rate-limit backoff (requeued by the periodic reconcile sweep)",
       });
       requeued++;
-    } else {
-      scheduleRateLimitRetryAt(card.id, retryAt);
     }
   }
 
   return requeued;
+}
+
+// Self-rescheduling poll, same shape as triggers/event-trigger.ts's tick
+// loop -- the actual backstop for reconcileRateLimitedCards above. Started
+// from startOrchestrator (so it only runs on the one real
+// ORCHESTRATOR_ENABLED instance, same reasoning as the rest of that gate)
+// and stopped alongside everything else on shutdown. Reads the poll
+// interval env var at call time, not module load -- lets a test override it
+// per-call without needing a fresh module import.
+export function startRateLimitReconcileLoop(): () => void {
+  const pollIntervalMs = Number(process.env.ORCHESTRATOR_RATE_LIMIT_POLL_MS ?? 60 * 1000);
+  let stopped = false;
+  let timer: NodeJS.Timeout | undefined;
+
+  async function tick() {
+    if (stopped) return;
+    try {
+      await reconcileRateLimitedCards();
+    } catch (err) {
+      console.error("[orchestrator:reconcile] rate-limit poll failed", err);
+    }
+    if (!stopped) {
+      timer = setTimeout(tick, pollIntervalMs);
+      timer.unref();
+    }
+  }
+
+  void tick();
+
+  return () => {
+    stopped = true;
+    if (timer) clearTimeout(timer);
+  };
 }
