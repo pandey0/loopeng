@@ -1,6 +1,6 @@
 import Fastify, { type FastifyInstance } from "fastify";
 import { and, desc, eq } from "drizzle-orm";
-import { boards, cards, db, docs, eventLog, pool } from "@loopeng/db";
+import { agentRuns, boards, cards, db, docs, eventLog, pool } from "@loopeng/db";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { authPlugin } from "../plugins/auth.js";
 import { errorHandlerPlugin } from "../plugins/error-handler.js";
@@ -97,11 +97,16 @@ describe("card mutation routes: verified actor identity", () => {
   });
 
   it("ignores a forged actorType in the transition body -- the event is attributed to the verified caller, not the claim", async () => {
-    const agentHeader = await authHeaderFor("agent", fakeAgentRunId);
-
     const [card] = await db.insert(cards).values({ boardId, title: "transition forgery attempt", state: "ready" }).returning({ id: cards.id });
     if (!card) throw new Error("card insert returned no row");
     createdCardIds.push(card.id);
+
+    // requireOwnCard only authorizes an agent-scoped key for the card its
+    // run was actually dispatched against, so the run row must point at
+    // this card for the request to get past that gate at all.
+    const [run] = await db.insert(agentRuns).values({ cardId: card.id, status: "running" }).returning({ id: agentRuns.id });
+    if (!run) throw new Error("agent run insert returned no row");
+    const agentHeader = await authHeaderFor("agent", run.id);
 
     const response = await app.inject({
       method: "POST",
@@ -119,7 +124,9 @@ describe("card mutation routes: verified actor identity", () => {
       .from(eventLog)
       .where(and(eq(eventLog.entityId, card.id), eq(eventLog.eventType, "card.moved")))
       .orderBy(desc(eventLog.id));
-    expect(movedEvent).toMatchObject({ actorType: "agent", actorId: fakeAgentRunId });
+    expect(movedEvent).toMatchObject({ actorType: "agent", actorId: run.id });
+
+    await db.delete(agentRuns).where(eq(agentRuns.id, run.id));
   });
 
   it("401s a transition with no Authorization header, and leaves no event_log trace or state change", async () => {

@@ -18,8 +18,13 @@ export const docRoutes: FastifyPluginAsync = async (fastify) => {
     return listDocs(docType ? { docType } : undefined);
   });
 
-  fastify.post("/docs", async (request, reply) => {
-    const input = DocCreateInputSchema.parse(request.body);
+  fastify.post("/docs", { preHandler: fastify.requireHumanActor }, async (request, reply) => {
+    // authorId is never taken from the request body -- there's no per-human
+    // account system yet (a single shared WEB_API_KEY covers every browser
+    // caller, see requireHumanActor), so a client-supplied authorId would be
+    // exactly the kind of self-reported, unverifiable identity card 438646e5
+    // is about. Left null rather than trusted.
+    const { authorId: _ignoredAuthorId, ...input } = DocCreateInputSchema.parse(request.body);
     const doc = await createDoc(input);
     reply.status(201).send(doc);
   });
@@ -39,9 +44,9 @@ export const docRoutes: FastifyPluginAsync = async (fastify) => {
     return getDocVersions(slug);
   });
 
-  fastify.post("/docs/:slug/versions", async (request, reply) => {
+  fastify.post("/docs/:slug/versions", { preHandler: fastify.requireHumanActor }, async (request, reply) => {
     const { slug } = request.params as { slug: string };
-    const input = DocUpdateInputSchema.parse(request.body);
+    const { authorId: _ignoredAuthorId, ...input } = DocUpdateInputSchema.parse(request.body);
     const doc = await updateDoc(slug, input);
     reply.status(201).send(doc);
   });

@@ -8,6 +8,7 @@ import {
   cardDocLinks,
   cardQuestions,
   cards,
+  createApiKey,
   docs as docsTable,
   projects,
 } from "@loopeng/db";
@@ -142,6 +143,26 @@ export async function getRoleId(name: string): Promise<string> {
   return role.id;
 }
 
+function apiBaseUrl(): string {
+  return process.env.NEXT_PUBLIC_API_URL ?? `http://localhost:${process.env.API_PORT ?? 4000}`;
+}
+
+// Card 438646e5: the 2026-07-03 incident's implementer had no verified
+// credential at all for the API, so nothing distinguished its raw `POST
+// /cards` curl call from a real human one -- the API just believed whatever
+// actorType the body claimed. Every Bash-capable, card-scoped run (the
+// implementer, reviewer, and integrator; the designer roles disallow Bash
+// entirely, see their own disallowedTools, so they get no credential to
+// misuse in the first place) now gets a fresh, single-run-scoped API key
+// instead: verified server-side by requireActor, attributed as
+// actorType=agent/actorId=this run's id, and authorized (requireOwnCard) for
+// exactly the one card this run was dispatched against -- not reused across
+// runs, and useless for touching any other card.
+async function cardScopedAgentEnv(runId: string): Promise<Record<string, string>> {
+  const { token } = await createApiKey({ actorType: "agent", actorId: runId, label: `agent-run:${runId}` });
+  return { CARD_API_KEY: token, CARD_API_URL: apiBaseUrl() };
+}
+
 export async function runImplementerAgent(card: Card, priorFailureNote?: string): Promise<AgentRunResult> {
   const worktree = await getActiveWorktree(card.id);
   if (!worktree) throw new Error(`no active worktree for card ${card.id}`);
@@ -176,6 +197,7 @@ export async function runImplementerAgent(card: Card, priorFailureNote?: string)
     prompt,
     permissionMode: "bypassPermissions",
     mcpConfig,
+    env: await cardScopedAgentEnv(run.id),
   });
   const logsRef = await writeAgentLog(run.id, result.raw);
 
@@ -564,6 +586,7 @@ export async function runReviewerAgent(card: Card): Promise<ReviewerRunResult> {
     permissionMode: "bypassPermissions",
     disallowedTools: reviewerDisallowedTools,
     mcpConfig,
+    env: await cardScopedAgentEnv(run.id),
   });
   const logsRef = await writeAgentLog(run.id, result.raw);
 
@@ -753,6 +776,7 @@ export async function runIntegratorAgent(
     prompt,
     permissionMode: "bypassPermissions",
     mcpConfig,
+    env: await cardScopedAgentEnv(run.id),
   });
   const logsRef = await writeAgentLog(run.id, result.raw);
   const question = !result.isError ? extractQuestion(result.resultText) : null;

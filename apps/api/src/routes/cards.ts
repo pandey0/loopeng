@@ -81,7 +81,7 @@ export const cardRoutes: FastifyPluginAsync = async (fastify) => {
     return card;
   });
 
-  fastify.patch("/cards/:id", { preHandler: fastify.requireActor }, async (request, reply) => {
+  fastify.patch("/cards/:id", { preHandler: [fastify.requireActor, fastify.requireOwnCard] }, async (request, reply) => {
     const { id } = request.params as { id: string };
     const input = CardUpdateInputSchema.parse(request.body);
     const actor = request.actor!;
@@ -192,7 +192,7 @@ export const cardRoutes: FastifyPluginAsync = async (fastify) => {
     return { diff };
   });
 
-  fastify.post("/cards/:id/transition", { preHandler: fastify.requireActor }, async (request, reply) => {
+  fastify.post("/cards/:id/transition", { preHandler: [fastify.requireActor, fastify.requireOwnCard] }, async (request, reply) => {
     const { id } = request.params as { id: string };
     const input = CardTransitionInputSchema.parse(request.body);
     const actor = request.actor!;
@@ -211,7 +211,7 @@ export const cardRoutes: FastifyPluginAsync = async (fastify) => {
   // orchestrator triggers and card.moved history fire identically either
   // way. CardNotFoundError/NoNextStateError/InvalidTransitionError/
   // ConcurrentTransitionError all bubble to the global error handler.
-  fastify.post("/cards/:id/advance", { preHandler: fastify.requireActor }, async (request, reply) => {
+  fastify.post("/cards/:id/advance", { preHandler: [fastify.requireActor, fastify.requireOwnCard] }, async (request, reply) => {
     const { id } = request.params as { id: string };
     const actor = request.actor!;
     const card = await advanceCard({ cardId: id, actorType: actor.type, actorId: actor.id ?? undefined });
@@ -222,7 +222,7 @@ export const cardRoutes: FastifyPluginAsync = async (fastify) => {
   // triggers dispatch cards automatically, but this lets a human (or a
   // test) force a specific ready card through implementer -> reviewer ->
   // gate_checks without waiting for a schedule.
-  fastify.post("/cards/:id/dispatch", async (request, reply) => {
+  fastify.post("/cards/:id/dispatch", { preHandler: [fastify.requireActor, fastify.requireOwnCard] }, async (request, reply) => {
     const { id } = request.params as { id: string };
     await fastify.orchestrator.coordination.dispatch(id);
     reply.status(202).send({ dispatched: id });
@@ -239,7 +239,7 @@ export const cardRoutes: FastifyPluginAsync = async (fastify) => {
   // attempt) to make this stick -- without that guard, a still-in-flight
   // attempt's own retry logic would just spawn another implementer call
   // against a card that already moved off in_progress.
-  fastify.post("/cards/:id/stop", { preHandler: fastify.requireActor }, async (request, reply) => {
+  fastify.post("/cards/:id/stop", { preHandler: [fastify.requireActor, fastify.requireOwnCard] }, async (request, reply) => {
     const { id } = request.params as { id: string };
     const actor = request.actor!;
     const [card] = await db.select().from(cards).where(eq(cards.id, id));
@@ -270,7 +270,7 @@ export const cardRoutes: FastifyPluginAsync = async (fastify) => {
   // Human answers a card_questions escalation (spec: card-questions-escalation).
   // Auto-resumes the card blocked -> ready so it redispatches on the next
   // event-trigger tick, with the Q&A injected into the implementer's prompt.
-  fastify.post("/cards/:id/questions/:questionId/answer", { preHandler: fastify.requireActor }, async (request, reply) => {
+  fastify.post("/cards/:id/questions/:questionId/answer", { preHandler: [fastify.requireActor, fastify.requireOwnCard] }, async (request, reply) => {
     const { id, questionId } = request.params as { id: string; questionId: string };
     const actor = request.actor!;
     const input = AnswerCardQuestionInputSchema.parse(request.body);
@@ -299,7 +299,7 @@ export const cardRoutes: FastifyPluginAsync = async (fastify) => {
     reply.send(updated);
   });
 
-  fastify.post("/cards/:id/dependencies", { preHandler: fastify.requireActor }, async (request, reply) => {
+  fastify.post("/cards/:id/dependencies", { preHandler: [fastify.requireActor, fastify.requireOwnCard] }, async (request, reply) => {
     const { id } = request.params as { id: string };
     const actor = request.actor!;
     const input = CardDependencySchema.omit({ cardId: true }).parse(request.body);
@@ -332,7 +332,7 @@ export const cardRoutes: FastifyPluginAsync = async (fastify) => {
     return fastify.db.select().from(cardDependencies).where(eq(cardDependencies.cardId, id));
   });
 
-  fastify.post("/cards/:id/doc-links", { preHandler: fastify.requireActor }, async (request, reply) => {
+  fastify.post("/cards/:id/doc-links", { preHandler: [fastify.requireActor, fastify.requireOwnCard] }, async (request, reply) => {
     const { id } = request.params as { id: string };
     const actor = request.actor!;
     const input = CardDocLinkSchema.omit({ cardId: true }).parse(request.body);

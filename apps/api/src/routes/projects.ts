@@ -26,7 +26,7 @@ export const projectRoutes: FastifyPluginAsync = async (fastify) => {
   // response comes back as soon as the project+board exist; the UI polls
   // briefStatus (pending -> analyzing -> ready|failed) to know when the
   // project's "brain" is ready.
-  fastify.post("/projects", async (request, reply) => {
+  fastify.post("/projects", { preHandler: fastify.requireHumanActor }, async (request, reply) => {
     const input = ProjectCreateInputSchema.parse(request.body);
 
     let repoPath: string;
@@ -141,7 +141,7 @@ export const projectRoutes: FastifyPluginAsync = async (fastify) => {
   // something that stays in sync with the repo as cards land -- there's no
   // scheduled re-analysis. This is the honest way to update it on demand
   // instead of pretending it's always current.
-  fastify.post<{ Params: { id: string } }>("/projects/:id/reanalyze", async (request, reply) => {
+  fastify.post<{ Params: { id: string } }>("/projects/:id/reanalyze", { preHandler: fastify.requireHumanActor }, async (request, reply) => {
     const [project] = await fastify.db.select().from(projects).where(eq(projects.id, request.params.id));
     if (!project) {
       reply.status(404).send({ error: "not_found" });
