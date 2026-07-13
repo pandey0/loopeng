@@ -1,6 +1,7 @@
 import { simpleGit } from "simple-git";
 import { execIn } from "../exec.js";
 import { syncWorktreeOntoBase } from "../sync.js";
+import { restartNativeApi } from "../native-api.js";
 import type { DeployContext, DeployProvider, DeployResult, HealthStatus } from "../types.js";
 
 // Resolved once, reused for both the docker build args and the health-check
@@ -24,6 +25,11 @@ const BUILD_ENV = { API_PORT, WEB_PORT };
 // is tracked as follow-up work, not done in this pass. Configurable via
 // DEPLOY_COMPOSE_SERVICES so a fully-containerized setup can opt back in.
 const COMPOSE_SERVICES = (process.env.DEPLOY_COMPOSE_SERVICES ?? "web").split(",").map((s) => s.trim());
+// The native api process's counterpart to rebuilding the web container above
+// -- see native-api.ts / native-api-supervisor.ts. Timeout configurable
+// since a cold pnpm install/typecheck on first boot can be slower than a
+// warm restart.
+const NATIVE_API_RESTART_TIMEOUT_MS = Number(process.env.DEPLOY_NATIVE_API_RESTART_TIMEOUT_MS ?? 60_000);
 
 async function pollHealth(ctx: DeployContext, timeoutMs: number): Promise<HealthStatus> {
   const deadline = Date.now() + timeoutMs;
@@ -99,6 +105,18 @@ export const dockerComposeProvider: DeployProvider = {
       return { status: "failed", createdNewCommit, deployedCommitSha: mergedSha, detail: { step: "docker compose up", code: build.code, stderrTail: build.stderr.slice(-3000) } };
     }
 
+    // The web container above is rebuilt fresh by `docker compose --build`
+    // so it always picks up mergedSha automatically. The native api process
+    // has no such mechanism -- it just keeps running whatever was in memory
+    // at last start, indefinitely, even though this merge just landed new
+    // code in its own working tree (card 6d4dc01a). Restart it explicitly
+    // and confirm via a changed /health bootId that a new process actually
+    // took over, not just that the old one is still answering.
+    const restart = await restartNativeApi({ healthUrl: API_URL, timeoutMs: NATIVE_API_RESTART_TIMEOUT_MS });
+    if (!restart.restarted) {
+      return { status: "failed", createdNewCommit, deployedCommitSha: mergedSha, detail: { step: "native api restart", ...restart.detail } };
+    }
+
     const health = await pollHealth(ctx, 90 * 1000);
     if (!health.healthy) {
       return { status: "failed", createdNewCommit, deployedCommitSha: mergedSha, detail: { step: "health check", ...health.detail } };
@@ -110,7 +128,7 @@ export const dockerComposeProvider: DeployProvider = {
       deployedCommitSha: mergedSha,
       deployUrl: `http://localhost:${WEB_PORT}`,
       monitoringDashboardUrl: `${API_URL}/health`,
-      detail: { build: "ok", health: health.detail },
+      detail: { build: "ok", nativeApiRestart: restart.detail, health: health.detail },
     };
   },
 
@@ -132,13 +150,21 @@ export const dockerComposeProvider: DeployProvider = {
       return { status: "failed", createdNewCommit: false, detail: { step: "docker compose up (rollback)", code: build.code, stderrTail: build.stderr.slice(-3000) } };
     }
 
+    // Same reasoning as deploy(): the revert above changed the native api's
+    // own working tree back to the pre-merge commit, but the process still
+    // has the failed merge's code loaded in memory until it's restarted too.
+    const restart = await restartNativeApi({ healthUrl: API_URL, timeoutMs: NATIVE_API_RESTART_TIMEOUT_MS });
+    if (!restart.restarted) {
+      return { status: "failed", createdNewCommit: false, detail: { step: "native api restart (rollback)", ...restart.detail } };
+    }
+
     const health = await pollHealth(ctx, 90 * 1000);
     const revertedSha = (await git.revparse(["HEAD"])).trim();
     return {
       status: health.healthy ? "live" : "failed",
       createdNewCommit: false,
       deployedCommitSha: revertedSha,
-      detail: { rolledBackTo: toCommitSha, health: health.detail },
+      detail: { rolledBackTo: toCommitSha, nativeApiRestart: restart.detail, health: health.detail },
     };
   },
 

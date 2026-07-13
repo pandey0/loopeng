@@ -7,7 +7,8 @@
   "types": "./src/index.ts",
   "scripts": {
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "test": "vitest run"
+    "test": "vitest run",
+    "supervise:native-api": "tsx src/native-api-supervisor.ts"
   },
   "dependencies": {
     "@loopeng/agents": "workspace:*",
@@ -19,6 +20,7 @@
     "simple-git": "^3.27.0"
   },
   "devDependencies": {
+    "tsx": "^4.19.1",
     "typescript": "^5.6.3",
     "vitest": "^3.2.6"
   }

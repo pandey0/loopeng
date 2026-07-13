@@ -25,3 +25,13 @@ If this is the one real instance (not a worktree-local copy an agent spun up to 
 ```
 WIKI_REPO_PATH=<repo-root>/data/wiki-repo ORCHESTRATOR_ENABLED=1 pnpm dev
 ```
+
+### Starting the one real instance
+
+Don't start the real instance's native `api` with the plain `pnpm dev`/`tsx` command above -- run it under `packages/deploy-engine`'s supervisor instead, so the deploy pipeline can actually restart it after a merge (see `native-api-supervisor.ts`; card `6d4dc01a` -- without this, the native process just keeps running whatever code was loaded at last manual start, forever):
+
+```
+pnpm --filter @loopeng/deploy-engine run supervise:native-api <repo-root>
+```
+
+The supervisor sets `ORCHESTRATOR_ENABLED=1`/`WIKI_REPO_PATH`/etc. by inheriting whatever environment it's started with, then spawns and owns `pnpm --filter @loopeng/api run start` as its child -- SIGTERM+respawn on request (from a deploy) or on an unexpected crash.
