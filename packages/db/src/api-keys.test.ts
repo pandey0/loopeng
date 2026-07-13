@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { eq } from "drizzle-orm";
 import { afterAll, describe, expect, it } from "vitest";
 import { createApiKey, ensureStaticApiKey, revokeApiKey, verifyApiKey } from "./api-keys.js";
@@ -50,7 +51,10 @@ describe("createApiKey / verifyApiKey", () => {
 
 describe("ensureStaticApiKey", () => {
   it("is idempotent and un-revokes a previously-revoked static token", async () => {
-    const token = "lk_static-web-ui-test-token";
+    // Not a real credential -- a fresh random value stands in for whatever
+    // WEB_API_KEY is at boot, only fixed within this test to prove
+    // re-registering the same value is idempotent.
+    const token = `test-static-token-${randomUUID()}`;
     await ensureStaticApiKey(token, { actorType: "user", label: "web-ui-test" });
     const [row] = await db.select().from(apiKeys).where(eq(apiKeys.label, "web-ui-test"));
     if (!row) throw new Error("expected api_keys row");
