@@ -16,6 +16,10 @@ describe("filterCardsByTitle", () => {
     expect(filterCardsByTitle(cards, "dashboard")).toEqual([cards[1], cards[2]]);
   });
 
+  it("trims surrounding whitespace before matching", () => {
+    expect(filterCardsByTitle(cards, "  dashboard  ")).toEqual([cards[1], cards[2]]);
+  });
+
   it("returns an empty array when nothing matches", () => {
     expect(filterCardsByTitle(cards, "zzz-no-such-card")).toEqual([]);
   });
