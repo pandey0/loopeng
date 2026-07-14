@@ -17,7 +17,24 @@ export type IntakeStatusResponse =
   | { status: "awaiting_approval"; proposal: PlannerProposal }
   | {
       status: "succeeded";
-      result: { agentRunId: string; epicCardId: string; cardIds: string[]; specDocId: string; managerAgentRunId?: string };
+      result: {
+        agentRunId: string;
+        epicCardId: string;
+        cardIds: string[];
+        specDocId: string;
+        managerAgentRunId?: string;
+        // True until the background manager review (kicked off, unawaited,
+        // right after approval below) either confirms or replaces this
+        // decomposition. persistManagerDecomposition can delete these exact
+        // cardIds and insert a fresh set under new ids -- so a caller that
+        // treats these ids as final the moment they see them (the approve
+        // response, a card-highlight deep link, a human copying an id out of
+        // a chat reply) can end up holding dead references seconds later
+        // with nothing telling it that happened. Poll status again while
+        // this is true; once it's false, cardIds is the settled, real
+        // result of that review (unchanged or replaced either way).
+        pendingManagerReview: boolean;
+      };
     }
   | { status: "failed"; error: string; code?: "planner_output_invalid" };
 
@@ -134,6 +151,7 @@ export const intakeRoutes: FastifyPluginAsync = async (fastify) => {
           cardIds: reviewedPayload?.cardIds ?? payload.cardIds,
           specDocId: payload.specDocId,
           managerAgentRunId: reviewedPayload?.agentRunId,
+          pendingManagerReview: !reviewedEvent,
         },
       } satisfies IntakeStatusResponse);
       return;
@@ -188,7 +206,18 @@ export const intakeRoutes: FastifyPluginAsync = async (fastify) => {
 
     reply.status(200).send({
       status: "succeeded",
-      result: { agentRunId: persisted.agentRunId, epicCardId: persisted.epicCardId, cardIds: persisted.cardIds, specDocId: persisted.specDocId },
+      result: {
+        agentRunId: persisted.agentRunId,
+        epicCardId: persisted.epicCardId,
+        cardIds: persisted.cardIds,
+        specDocId: persisted.specDocId,
+        // The manager review just kicked off above hasn't resolved yet --
+        // these are this instant's real ids, but persistManagerDecomposition
+        // can still delete and replace them. See IntakeStatusResponse's
+        // comment: don't treat these as final, poll the GET status endpoint
+        // until pendingManagerReview clears.
+        pendingManagerReview: true,
+      },
     } satisfies IntakeStatusResponse);
   });
 };

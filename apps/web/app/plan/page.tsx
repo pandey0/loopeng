@@ -55,7 +55,16 @@ function PlanPageInner() {
     queryKey: ["intake-status", boardId, selectedId],
     queryFn: () => api.getIntakeStatus(boardId!, selectedId!),
     enabled: !!boardId && !!selectedId,
-    refetchInterval: (query) => (query.state.data?.status === "running" ? STATUS_POLL_MS : false),
+    // Keep polling while the background manager review hasn't settled yet
+    // (see IntakeResult.pendingManagerReview) -- it can still delete and
+    // replace result.cardIds, so a caller reading this query's data needs
+    // the final, post-review set before treating any card id as real.
+    refetchInterval: (query) => {
+      const data = query.state.data;
+      if (data?.status === "running") return STATUS_POLL_MS;
+      if (data?.status === "succeeded" && data.result.pendingManagerReview) return STATUS_POLL_MS;
+      return false;
+    },
   });
 
   const approveMutation = useMutation({
@@ -196,16 +205,27 @@ function PlanPageInner() {
                 <p className="text-sm font-semibold text-success">
                   ✓ Created {status.result.cardIds.length + 1} card{status.result.cardIds.length === 0 ? "" : "s"} in backlog.
                 </p>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="mt-2"
-                  onClick={() =>
-                    router.push(`/board?highlight=${[status.result.epicCardId, ...status.result.cardIds].join(",")}`)
-                  }
-                >
-                  View on board
-                </Button>
+                {status.result.pendingManagerReview ? (
+                  // A manager review is still deciding whether to keep this
+                  // breakdown or replace it with a different split -- see
+                  // IntakeResult.pendingManagerReview. Navigating with these
+                  // ids right now risks a highlight link into cards that get
+                  // deleted moments later; the statusQuery above keeps
+                  // polling until this clears, at which point cardIds (and
+                  // this button) reflect whatever the review actually kept.
+                  <p className="mt-2 text-xs text-muted-foreground">Manager is reviewing this breakdown…</p>
+                ) : (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="mt-2"
+                    onClick={() =>
+                      router.push(`/board?highlight=${[status.result.epicCardId, ...status.result.cardIds].join(",")}`)
+                    }
+                  >
+                    View on board
+                  </Button>
+                )}
               </div>
             )}
 

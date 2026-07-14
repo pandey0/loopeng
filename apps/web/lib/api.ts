@@ -80,6 +80,10 @@ export interface IntakeResult {
   cardIds: string[];
   specDocId: string;
   managerAgentRunId?: string;
+  // True until the background manager review settles -- it can delete and
+  // replace cardIds with a fresh set under new ids. Don't navigate/highlight
+  // using cardIds while this is true; keep polling intake status instead.
+  pendingManagerReview: boolean;
 }
 
 export interface IntakeStartResult {
