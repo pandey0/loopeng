@@ -53,6 +53,10 @@ describe("isRateLimitError", () => {
   it("is false for a genuine review rejection", () => {
     expect(isRateLimitError("VERDICT: FAIL\nCRITERION: handles null email -> NOT SATISFIED")).toBe(false);
   });
+
+  it("recognizes the real Claude CLI weekly-limit message", () => {
+    expect(isRateLimitError("You've hit your weekly limit · resets Jul 14, 3:30pm (Asia/Kolkata)")).toBe(true);
+  });
 });
 
 // Asia/Kolkata has a fixed UTC+5:30 offset (no DST), which makes these exact
@@ -81,5 +85,20 @@ describe("parseRateLimitResetAt", () => {
 
   it("returns null when the timezone name isn't real, instead of throwing", () => {
     expect(parseRateLimitResetAt("You've hit your session limit · resets 1:40am (Not/AZone)")).toBeNull();
+  });
+
+  it("resolves the weekly-limit's dated clause (this year) when that date is still ahead of referenceTime", () => {
+    // referenceTime = 2026-07-13T01:00 IST -- Jul 14 3:30pm IST is later this year.
+    const referenceTime = new Date("2026-07-12T19:30:00.000Z");
+    const resetAt = parseRateLimitResetAt("You've hit your weekly limit · resets Jul 14, 3:30pm (Asia/Kolkata)", referenceTime);
+    // Jul 14 3:30pm IST == Jul 14 10:00 UTC.
+    expect(resetAt?.toISOString()).toBe("2026-07-14T10:00:00.000Z");
+  });
+
+  it("rolls the weekly-limit's dated clause to next year once that date has already passed", () => {
+    // referenceTime is after Jul 14 3:30pm IST this year.
+    const referenceTime = new Date("2026-07-14T11:00:00.000Z");
+    const resetAt = parseRateLimitResetAt("You've hit your weekly limit · resets Jul 14, 3:30pm (Asia/Kolkata)", referenceTime);
+    expect(resetAt?.toISOString()).toBe("2027-07-14T10:00:00.000Z");
   });
 });

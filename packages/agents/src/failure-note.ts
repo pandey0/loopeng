@@ -18,17 +18,33 @@ export type FailureKind = "implementer_error" | "review_rejected" | "gates_faile
 // runReviewerAgent's comment) specifically so a broken run can never wave a
 // card through, which means a rate-limited reviewer call reads exactly like
 // a genuine rejection unless this is checked first.
-const RATE_LIMIT_MARKERS = ["session limit", "rate limit", "usage limit"];
+//
+// "weekly limit" is the same shape but for the account's longer-period cap
+// ("You've hit your weekly limit · resets Jul 14, 3:30pm (Asia/Kolkata)") --
+// missing this marker meant that message fell straight through to the
+// generic implementer/review failure path, burned all MAX_ATTEMPTS retries
+// back-to-back within seconds (nothing paces retries in that path), and
+// permanently blocked the card instead of getting the same backoff-and-retry
+// treatment. Confirmed live on 2026-07-13: four cards did exactly this.
+const RATE_LIMIT_MARKERS = ["session limit", "rate limit", "usage limit", "weekly limit"];
 
 export function isRateLimitError(resultText: string): boolean {
   const lower = resultText.toLowerCase();
   return RATE_LIMIT_MARKERS.some((marker) => lower.includes(marker));
 }
 
-// Matches the "resets 1:40am (Asia/Kolkata)" clause in the real CLI message
-// above -- a daily wall-clock moment, never a date, since the message never
-// says which day it means.
+// Matches the session-limit shape's "resets 1:40am (Asia/Kolkata)" clause --
+// a daily wall-clock moment, never a date, since the message never says
+// which day it means.
 const RESET_TIME_PATTERN = /resets\s+(\d{1,2}):(\d{2})\s*(am|pm)\s*\(([^)]+)\)/i;
+
+// Matches the weekly-limit shape's "resets Jul 14, 3:30pm (Asia/Kolkata)"
+// clause -- unlike the session limit, this one does name a date, since a
+// week-scale reset can't be assumed to fall on "today or tomorrow" the way
+// a same-day session reset can.
+const RESET_DATE_TIME_PATTERN = /resets\s+([A-Za-z]{3})[a-z]*\s+(\d{1,2}),?\s+(\d{1,2}):(\d{2})\s*(am|pm)\s*\(([^)]+)\)/i;
+
+const MONTH_ABBREVIATIONS = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"];
 
 function timeZonePartsAt(date: Date, timeZone: string): { year: number; month: number; day: number } {
   const dtf = new Intl.DateTimeFormat("en-US", {
@@ -73,12 +89,42 @@ function zonedTimeToUtc(year: number, month: number, day: number, hour: number, 
 // Parses the real reset instant out of the CLI's rate-limit message, instead
 // of the caller guessing at a fixed backoff -- see loop.ts's
 // RATE_LIMIT_BACKOFF_MS comment for why a fixed 20-minute retry against an
-// account that resets hours from now just burns another attempt into the
-// same wall. Returns the next occurrence of that wall-clock time on or after
-// referenceTime (today's if still ahead, otherwise tomorrow's), or null if
-// the text doesn't contain a recognizable "resets HH:MM(am|pm) (Zone)"
-// clause -- callers fall back to a fixed backoff in that case.
+// account that resets hours (or days) from now just burns another attempt
+// into the same wall. Tries the weekly-limit's dated clause first (more
+// specific pattern), then falls back to the session-limit's undated one.
+// Returns null if the text doesn't match either shape -- callers fall back
+// to a fixed backoff in that case.
 export function parseRateLimitResetAt(resultText: string, referenceTime: Date = new Date()): Date | null {
+  const dateTimeMatch = resultText.match(RESET_DATE_TIME_PATTERN);
+  if (dateTimeMatch) {
+    const [, monthStr, dayStr, hourStr, minuteStr, meridiem, timeZone] = dateTimeMatch;
+    const monthIndex = MONTH_ABBREVIATIONS.indexOf(monthStr!.toLowerCase().slice(0, 3));
+    if (monthIndex === -1) return null;
+
+    let hour = Number(hourStr) % 12;
+    if (meridiem?.toLowerCase() === "pm") hour += 12;
+    const minute = Number(minuteStr);
+    const day = Number(dayStr);
+    const month = monthIndex + 1;
+
+    let year: number;
+    try {
+      year = timeZonePartsAt(referenceTime, timeZone!).year;
+    } catch {
+      return null; // timeZone wasn't a real IANA name -- don't guess
+    }
+
+    // The message never names a year -- assume the nearest occurrence of
+    // this month/day on or after referenceTime, rolling to next year only
+    // if that date has already passed (mirrors the day-rollover below, one
+    // level up).
+    let target = zonedTimeToUtc(year, month, day, hour, minute, timeZone!);
+    if (target.getTime() <= referenceTime.getTime()) {
+      target = zonedTimeToUtc(year + 1, month, day, hour, minute, timeZone!);
+    }
+    return target;
+  }
+
   const match = resultText.match(RESET_TIME_PATTERN);
   if (!match) return null;
   const [, hourStr, minuteStr, meridiem, timeZone] = match;
