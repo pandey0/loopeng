@@ -1,37 +1,45 @@
 import { randomUUID } from "node:crypto";
+import Fastify, { type FastifyInstance } from "fastify";
 import { eq } from "drizzle-orm";
 import { docs, db, pool } from "@loopeng/db";
 import { buildSubAgentMcpConfig, runClaudeCli } from "@loopeng/agents";
 import { createDoc } from "@loopeng/doc-engine";
 import { afterAll, describe, expect, it } from "vitest";
+import { authPlugin } from "../plugins/auth.js";
+import { errorHandlerPlugin } from "../plugins/error-handler.js";
+import { docRoutes } from "./docs.js";
 
 // Real (non-mocked) end-to-end integration test for the get_doc MCP tool
-// (RFC: rfc/2026-07-obsidian-vault-token-efficiency). Seeds a real doc-engine
+// (RFC: rfc/2026-07-obsidian-vault-token-efficiency), against a real,
+// listening instance of this API's own /docs routes. Seeds a real doc-engine
 // doc whose body contains a marker string that only exists in the FULL body,
 // not its one-line summary, then drives a real claude CLI run whose prompt
 // gives it only the slug + summary (mirroring what buildImplementerPrompt
 // actually sends) and instructs it to call get_doc to find the marker. This
 // proves the tool is wired into a real agent's tool-call loop, not just that
-// the handler function returns the right text in isolation.
-//
-// Deliberately does NOT override WIKI_REPO_PATH to an isolated tmp dir here:
-// this file statically imports @loopeng/agents, which transitively imports
-// @loopeng/doc-engine (via roles.ts) before any test body runs — doc-engine's
-// module-level repoRoot constant is computed on first import and then cached,
-// so an override set later (even in beforeAll, even via dynamic import) would
-// be too late for the module this process already loaded, while the spawned
-// CLI's own MCP server subprocess (a separate, fresh process) would pick up
-// the override and disagree on which repo to read from. Using the same
-// ambient path for both sides — now forwarded explicitly to the subprocess
-// via buildSubAgentMcpConfig (see packages/agents/src/sub-agent.ts) — keeps
-// them consistent, same as server.test.ts's spawn_sub_agent test uses the
-// real DB directly rather than an isolated one.
-describe("get_doc MCP tool (real end-to-end)", () => {
+// the handler function returns the right text in isolation. Replaces
+// packages/mcp-subagent's old get-doc.test.ts, which drove doc-engine's
+// getDoc() (and a direct-DB read) from inside the MCP server process --
+// card 438646e5 replaced that with an HTTP call to this route, which is why
+// the real thing worth exercising end-to-end now lives here.
+async function buildApp(): Promise<{ app: FastifyInstance; url: string }> {
+  const fastify = Fastify();
+  await fastify.register(errorHandlerPlugin);
+  await fastify.register(authPlugin);
+  await fastify.register(docRoutes);
+  await fastify.listen({ port: 0, host: "127.0.0.1" });
+  const address = fastify.server.address();
+  if (address === null || typeof address === "string") throw new Error("expected a bound TCP address");
+  return { app: fastify, url: `http://127.0.0.1:${address.port}` };
+}
+
+describe("get_doc MCP tool (real end-to-end, over the /docs API)", () => {
   afterAll(async () => {
     await pool.end();
   });
 
   it("lets a real agent fetch a doc's full body via get_doc(slug) after seeing only its summary", async () => {
+    const { app, url } = await buildApp();
     const marker = `MARKER-${randomUUID().slice(0, 8)}`;
     const slug = `get-doc-e2e-verify-${Date.now()}`;
 
@@ -52,6 +60,8 @@ describe("get_doc MCP tool (real end-to-end)", () => {
       cwd: process.cwd(),
       depth: 1,
       disallowedTools: ["Edit", "Write", "NotebookEdit", "Bash"],
+      cardApiKey: "lk_unused-get-doc-is-unauthenticated",
+      cardApiUrl: url,
     });
 
     const prompt = [
@@ -79,6 +89,7 @@ describe("get_doc MCP tool (real end-to-end)", () => {
       expect(result.resultText).toContain(marker);
     } finally {
       await db.delete(docs).where(eq(docs.id, doc.id));
+      await app.close();
     }
   }, 180_000);
 });

@@ -1,23 +1,45 @@
 import { randomUUID } from "node:crypto";
+import Fastify, { type FastifyInstance } from "fastify";
 import { eq } from "drizzle-orm";
-import { agentRuns, db, pool } from "@loopeng/db";
+import { agentRuns, createApiKey, db, pool } from "@loopeng/db";
 import { buildSubAgentMcpConfig, MAX_DELEGATION_DEPTH, runClaudeCli } from "@loopeng/agents";
 import { afterAll, describe, expect, it } from "vitest";
+import { authPlugin } from "../plugins/auth.js";
+import { errorHandlerPlugin } from "../plugins/error-handler.js";
+import { agentRunRoutes } from "./agent-runs.js";
 
 // Real (non-mocked) end-to-end integration test. Drives the actual `claude`
 // CLI with --mcp-config pointing at our real MCP server (spawned by the CLI
 // itself, as tsx src/server.ts, exactly as buildSubAgentMcpConfig wires it in
-// production) — no mocking of the tool call, the DB insert, or the nested
-// sub-agent's own claude CLI run. Requires the `claude` CLI installed and
-// authenticated (same requirement as the rest of this package's runtime deps).
-describe("spawn_sub_agent MCP tool (real end-to-end)", () => {
+// production) against a real, listening instance of this API's own
+// agent-runs routes -- no mocking of the tool call, the HTTP round trip, or
+// the nested sub-agent's own claude CLI run. Requires the `claude` CLI
+// installed and authenticated (same requirement as the rest of this
+// package's runtime deps). This replaces packages/mcp-subagent's old
+// server.test.ts, which drove spawnSubAgent's raw DB insert directly --
+// card 438646e5 removed that DB path entirely, so the real thing to exercise
+// end-to-end now is the HTTP route, which is why this test lives here.
+async function buildApp(): Promise<{ app: FastifyInstance; url: string }> {
+  const fastify = Fastify();
+  await fastify.register(errorHandlerPlugin);
+  await fastify.register(authPlugin);
+  await fastify.register(agentRunRoutes);
+  await fastify.listen({ port: 0, host: "127.0.0.1" });
+  const address = fastify.server.address();
+  if (address === null || typeof address === "string") throw new Error("expected a bound TCP address");
+  return { app: fastify, url: `http://127.0.0.1:${address.port}` };
+}
+
+describe("spawn_sub_agent MCP tool (real end-to-end, over the /agent-runs API)", () => {
   afterAll(async () => {
     await pool.end();
   });
 
   it("spawns a real sub-agent run whose result the parent uses in its own final answer", async () => {
+    const { app, url } = await buildApp();
     const [parent] = await db.insert(agentRuns).values({ status: "running" }).returning({ id: agentRuns.id });
     if (!parent) throw new Error("insert did not return a row");
+    const { token: parentApiKey } = await createApiKey({ actorType: "agent", actorId: parent.id, label: "test-parent" });
 
     const marker = `ECHO-${randomUUID().slice(0, 8)}`;
     const mcpConfig = buildSubAgentMcpConfig({
@@ -27,6 +49,8 @@ describe("spawn_sub_agent MCP tool (real end-to-end)", () => {
       cwd: process.cwd(),
       depth: 1,
       disallowedTools: ["Edit", "Write", "NotebookEdit", "Bash"],
+      cardApiKey: parentApiKey,
+      cardApiUrl: url,
     });
 
     const prompt = [
@@ -59,12 +83,15 @@ describe("spawn_sub_agent MCP tool (real end-to-end)", () => {
     } finally {
       await db.delete(agentRuns).where(eq(agentRuns.parentAgentRunId, parent.id));
       await db.delete(agentRuns).where(eq(agentRuns.id, parent.id));
+      await app.close();
     }
   }, 180_000);
 
   it("returns a clear tool error (not a hang) when delegation depth is already at the cap", async () => {
+    const { app, url } = await buildApp();
     const [parent] = await db.insert(agentRuns).values({ status: "running" }).returning({ id: agentRuns.id });
     if (!parent) throw new Error("insert did not return a row");
+    const { token: parentApiKey } = await createApiKey({ actorType: "agent", actorId: parent.id, label: "test-parent" });
 
     // Simulate this run already being at the deepest allowed level: the next
     // spawn_sub_agent call would create a run one past MAX_DELEGATION_DEPTH.
@@ -75,6 +102,8 @@ describe("spawn_sub_agent MCP tool (real end-to-end)", () => {
       cwd: process.cwd(),
       depth: MAX_DELEGATION_DEPTH + 1,
       disallowedTools: ["Edit", "Write", "NotebookEdit", "Bash"],
+      cardApiKey: parentApiKey,
+      cardApiUrl: url,
     });
 
     const prompt = [
@@ -97,6 +126,7 @@ describe("spawn_sub_agent MCP tool (real end-to-end)", () => {
       expect(subRuns).toHaveLength(0);
     } finally {
       await db.delete(agentRuns).where(eq(agentRuns.id, parent.id));
+      await app.close();
     }
   }, 180_000);
 });

@@ -150,15 +150,18 @@ function apiBaseUrl(): string {
 // Card 438646e5: the 2026-07-03 incident's implementer had no verified
 // credential at all for the API, so nothing distinguished its raw `POST
 // /cards` curl call from a real human one -- the API just believed whatever
-// actorType the body claimed. Every Bash-capable, card-scoped run (the
-// implementer, reviewer, and integrator; the designer roles disallow Bash
-// entirely, see their own disallowedTools, so they get no credential to
-// misuse in the first place) now gets a fresh, single-run-scoped API key
-// instead: verified server-side by requireActor, attributed as
-// actorType=agent/actorId=this run's id, and authorized (requireOwnCard) for
-// exactly the one card this run was dispatched against -- not reused across
-// runs, and useless for touching any other card.
-async function cardScopedAgentEnv(runId: string): Promise<Record<string, string>> {
+// actorType the body claimed. Every run now gets a fresh, single-run-scoped
+// API key: verified server-side by requireActor, attributed as
+// actorType=agent/actorId=this run's id, and (for card-scoped runs)
+// authorized by requireOwnCard for exactly the one card this run was
+// dispatched against -- not reused across runs, and useless for touching
+// any other card. Bash-capable, card-scoped roles (implementer, reviewer,
+// integrator) merge it onto their own top-level env; every role also passes
+// it into buildSubAgentMcpConfig so its sub-agent MCP server subprocess
+// (spawn_sub_agent, get_doc) authenticates the same way instead of holding
+// any kind of direct database credential (migration 0013 revoked the one
+// that subprocess used to get).
+async function runApiKeyEnv(runId: string): Promise<Record<string, string>> {
   const { token } = await createApiKey({ actorType: "agent", actorId: runId, label: `agent-run:${runId}` });
   return { CARD_API_KEY: token, CARD_API_URL: apiBaseUrl() };
 }
@@ -184,12 +187,15 @@ export async function runImplementerAgent(card: Card, priorFailureNote?: string)
   // test runs — the agent reports success but never actually finishes. The
   // worktree is the real isolation boundary here (a physically separate
   // checkout the agent cwd is pinned to), so full autonomy inside it is safe.
+  const agentEnv = await runApiKeyEnv(run.id);
   const mcpConfig = buildSubAgentMcpConfig({
     parentAgentRunId: run.id,
     cardId: card.id,
     worktreeId: worktree.id,
     cwd: worktree.fsPath,
     depth: 1,
+    cardApiKey: agentEnv.CARD_API_KEY!,
+    cardApiUrl: agentEnv.CARD_API_URL!,
   });
   const result = await runClaudeCliStreamingOnce({
     cwd: worktree.fsPath,
@@ -197,7 +203,7 @@ export async function runImplementerAgent(card: Card, priorFailureNote?: string)
     prompt,
     permissionMode: "bypassPermissions",
     mcpConfig,
-    env: await cardScopedAgentEnv(run.id),
+    env: agentEnv,
   });
   const logsRef = await writeAgentLog(run.id, result.raw);
 
@@ -360,6 +366,7 @@ export function extractResultEventForApi(transcript: unknown): string | null {
 
 async function executePlannerAgent(runId: string, prompt: string): Promise<PlannerConversationResult> {
   const plannerDisallowedTools = ["Edit", "Write", "NotebookEdit", "Bash"];
+  const agentEnv = await runApiKeyEnv(runId);
   const mcpConfig = buildSubAgentMcpConfig({
     parentAgentRunId: runId,
     cardId: null,
@@ -367,6 +374,8 @@ async function executePlannerAgent(runId: string, prompt: string): Promise<Plann
     cwd: resolveRepoRoot(),
     depth: 1,
     disallowedTools: plannerDisallowedTools,
+    cardApiKey: agentEnv.CARD_API_KEY!,
+    cardApiUrl: agentEnv.CARD_API_URL!,
   });
 
   const session = runClaudeCliStreaming({
@@ -505,6 +514,7 @@ export async function runManagerAgent(epicCardId: string): Promise<ManagerRunRes
   if (!run) throw new Error("failed to insert agent_runs row");
 
   const managerDisallowedTools = ["Edit", "Write", "NotebookEdit", "Bash"];
+  const managerAgentEnv = await runApiKeyEnv(run.id);
   const mcpConfig = buildSubAgentMcpConfig({
     parentAgentRunId: run.id,
     cardId: epicCardId,
@@ -512,6 +522,8 @@ export async function runManagerAgent(epicCardId: string): Promise<ManagerRunRes
     cwd: resolveRepoRoot(),
     depth: 1,
     disallowedTools: managerDisallowedTools,
+    cardApiKey: managerAgentEnv.CARD_API_KEY!,
+    cardApiUrl: managerAgentEnv.CARD_API_URL!,
   });
   const result = await runClaudeCliStreamingOnce({
     cwd: resolveRepoRoot(),
@@ -571,6 +583,7 @@ export async function runReviewerAgent(card: Card): Promise<ReviewerRunResult> {
   // A sub-agent spawned by the reviewer inherits the same restriction — the
   // reviewer's read-only guarantee shouldn't be escapable by delegating the
   // edit to a sub-agent.
+  const reviewerAgentEnv = await runApiKeyEnv(run.id);
   const mcpConfig = buildSubAgentMcpConfig({
     parentAgentRunId: run.id,
     cardId: card.id,
@@ -578,6 +591,8 @@ export async function runReviewerAgent(card: Card): Promise<ReviewerRunResult> {
     cwd: worktree.fsPath,
     depth: 1,
     disallowedTools: reviewerDisallowedTools,
+    cardApiKey: reviewerAgentEnv.CARD_API_KEY!,
+    cardApiUrl: reviewerAgentEnv.CARD_API_URL!,
   });
   const result = await runClaudeCliStreamingOnce({
     cwd: worktree.fsPath,
@@ -586,7 +601,7 @@ export async function runReviewerAgent(card: Card): Promise<ReviewerRunResult> {
     permissionMode: "bypassPermissions",
     disallowedTools: reviewerDisallowedTools,
     mcpConfig,
-    env: await cardScopedAgentEnv(run.id),
+    env: reviewerAgentEnv,
   });
   const logsRef = await writeAgentLog(run.id, result.raw);
 
@@ -649,6 +664,7 @@ export async function runDesignerSpecAgent(card: Card): Promise<AgentRunResult> 
   if (!run) throw new Error("failed to insert agent_runs row");
 
   const designerDisallowedTools = ["Edit", "Write", "NotebookEdit", "Bash"];
+  const designerSpecAgentEnv = await runApiKeyEnv(run.id);
   const mcpConfig = buildSubAgentMcpConfig({
     parentAgentRunId: run.id,
     cardId: card.id,
@@ -656,6 +672,8 @@ export async function runDesignerSpecAgent(card: Card): Promise<AgentRunResult> 
     cwd: worktree.fsPath,
     depth: 1,
     disallowedTools: designerDisallowedTools,
+    cardApiKey: designerSpecAgentEnv.CARD_API_KEY!,
+    cardApiUrl: designerSpecAgentEnv.CARD_API_URL!,
   });
   const result = await runClaudeCliStreamingOnce({
     cwd: worktree.fsPath,
@@ -715,6 +733,7 @@ export async function runDesignerReviewAgent(card: Card): Promise<ReviewerRunRes
   if (!run) throw new Error("failed to insert agent_runs row");
 
   const designerDisallowedTools = ["Edit", "Write", "NotebookEdit", "Bash"];
+  const designerReviewAgentEnv = await runApiKeyEnv(run.id);
   const mcpConfig = buildSubAgentMcpConfig({
     parentAgentRunId: run.id,
     cardId: card.id,
@@ -722,6 +741,8 @@ export async function runDesignerReviewAgent(card: Card): Promise<ReviewerRunRes
     cwd: worktree.fsPath,
     depth: 1,
     disallowedTools: designerDisallowedTools,
+    cardApiKey: designerReviewAgentEnv.CARD_API_KEY!,
+    cardApiUrl: designerReviewAgentEnv.CARD_API_URL!,
   });
   const result = await runClaudeCliStreamingOnce({
     cwd: worktree.fsPath,
@@ -763,12 +784,15 @@ export async function runIntegratorAgent(
     .returning();
   if (!run) throw new Error("failed to insert agent_runs row");
 
+  const integratorAgentEnv = await runApiKeyEnv(run.id);
   const mcpConfig = buildSubAgentMcpConfig({
     parentAgentRunId: run.id,
     cardId: card.id,
     worktreeId: worktree.id,
     cwd: worktree.fsPath,
     depth: 1,
+    cardApiKey: integratorAgentEnv.CARD_API_KEY!,
+    cardApiUrl: integratorAgentEnv.CARD_API_URL!,
   });
   const result = await runClaudeCliStreamingOnce({
     cwd: worktree.fsPath,
@@ -776,7 +800,7 @@ export async function runIntegratorAgent(
     prompt,
     permissionMode: "bypassPermissions",
     mcpConfig,
-    env: await cardScopedAgentEnv(run.id),
+    env: integratorAgentEnv,
   });
   const logsRef = await writeAgentLog(run.id, result.raw);
   const question = !result.isError ? extractQuestion(result.resultText) : null;
@@ -845,6 +869,7 @@ async function executeProjectAnalyzerAgent(
   runId: string,
   prompt: string,
 ): Promise<AgentRunResult> {
+  const analyzerAgentEnv = await runApiKeyEnv(runId);
   const mcpConfig = buildSubAgentMcpConfig({
     parentAgentRunId: runId,
     cardId: null,
@@ -852,6 +877,8 @@ async function executeProjectAnalyzerAgent(
     cwd: project.repoPath,
     depth: 1,
     disallowedTools: analyzerDisallowedTools,
+    cardApiKey: analyzerAgentEnv.CARD_API_KEY!,
+    cardApiUrl: analyzerAgentEnv.CARD_API_URL!,
   });
   const result = await runClaudeCliStreamingOnce({
     cwd: project.repoPath,

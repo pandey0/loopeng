@@ -2,16 +2,17 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 import { spawnSubAgent, SubAgentDepthExceededError } from "@loopeng/agents";
-import { cardDocLinks, db } from "@loopeng/db";
-import { createDoc, getDoc } from "@loopeng/doc-engine";
 
 // This process is spawned per-session by the `claude` CLI (via --mcp-config,
 // see buildSubAgentMcpConfig in @loopeng/agents) — one instance per running
 // agent, not shared across runs. All the context it needs about the run that
-// spawned it travels in via env vars set on that spawn, rather than an IPC/
-// HTTP call back to the API process: this script has the same workspace
-// access to @loopeng/db and @loopeng/agents that the API does, so it can do
-// the sub-agent's DB insert + streaming run directly in-process.
+// spawned it travels in via env vars set on that spawn, rather than an IPC
+// call back to the API process. Card 438646e5: this process has no database
+// credential of its own (scoped or otherwise) — spawn_sub_agent and get_doc
+// both talk to the API over CARD_API_URL/CARD_API_KEY, the same
+// single-run-scoped credential the top-level run itself gets, so every
+// mutation and read this process makes is authenticated and auditable the
+// same way any other card action is.
 interface SubAgentEnvContext {
   parentAgentRunId: string;
   cardId: string | null;
@@ -19,14 +20,18 @@ interface SubAgentEnvContext {
   cwd: string;
   depth: number;
   disallowedTools: string[] | undefined;
+  cardApiKey: string;
+  cardApiUrl: string;
 }
 
 function readEnvContext(): SubAgentEnvContext {
   const parentAgentRunId = process.env.LOOPENG_PARENT_AGENT_RUN_ID;
   const cwd = process.env.LOOPENG_CWD;
-  if (!parentAgentRunId || !cwd) {
+  const cardApiKey = process.env.CARD_API_KEY;
+  const cardApiUrl = process.env.CARD_API_URL;
+  if (!parentAgentRunId || !cwd || !cardApiKey || !cardApiUrl) {
     throw new Error(
-      "mcp-subagent server missing required LOOPENG_PARENT_AGENT_RUN_ID / LOOPENG_CWD env vars — was it launched outside buildSubAgentMcpConfig?",
+      "mcp-subagent server missing required LOOPENG_PARENT_AGENT_RUN_ID / LOOPENG_CWD / CARD_API_KEY / CARD_API_URL env vars — was it launched outside buildSubAgentMcpConfig?",
     );
   }
   const disallowedTools = process.env.LOOPENG_DISALLOWED_TOOLS?.split(",").filter(Boolean);
@@ -37,7 +42,42 @@ function readEnvContext(): SubAgentEnvContext {
     worktreeId: process.env.LOOPENG_WORKTREE_ID || null,
     depth: Number(process.env.LOOPENG_DELEGATION_DEPTH ?? "0"),
     disallowedTools: disallowedTools?.length ? disallowedTools : undefined,
+    cardApiKey,
+    cardApiUrl,
   };
+}
+
+// Read-only, so a plain unauthenticated GET (same as the web app's own doc
+// reads) rather than needing the bearer token -- but routed through the API
+// like everything else here rather than a direct DB+git read, so this
+// process never needs any credential beyond CARD_API_KEY.
+async function fetchDoc(apiUrl: string, slug: string): Promise<{ title: string; docType: string; status: string; body: string } | null> {
+  const res = await fetch(`${apiUrl}/docs/${encodeURIComponent(slug)}`);
+  if (res.status === 404) return null;
+  if (!res.ok) throw new Error(`get_doc: failed to fetch doc "${slug}" (${res.status}): ${await res.text()}`);
+  return (await res.json()) as { title: string; docType: string; status: string; body: string };
+}
+
+// Mutating (creates a doc + a card link), so this one needs the bearer
+// token like spawn_sub_agent -- routed through POST /cards/:id/adr-docs
+// (requireActor + requireOwnCard server-side) instead of this process
+// calling createDoc/db.insert(cardDocLinks) directly, for the same reason
+// spawn_sub_agent/get_doc don't touch the DB either (card 438646e5).
+async function createAdrDoc(
+  apiUrl: string,
+  apiKey: string,
+  cardId: string,
+  input: { slug: string; title: string; summary: string; content: string; tags: string[] },
+): Promise<{ docId: string }> {
+  const res = await fetch(`${apiUrl}/cards/${encodeURIComponent(cardId)}/adr-docs`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
+    body: JSON.stringify(input),
+  });
+  if (!res.ok) {
+    throw new Error(`create_adr_doc: failed to create ADR (${res.status}): ${await res.text()}`);
+  }
+  return (await res.json()) as { docId: string };
 }
 
 const server = new McpServer({ name: "loopeng-subagent", version: "0.1.0" });
@@ -66,6 +106,8 @@ server.registerTool(
         disallowedTools: ctx.disallowedTools,
         task,
         context: context ?? "",
+        cardApiKey: ctx.cardApiKey,
+        cardApiUrl: ctx.cardApiUrl,
       });
       return {
         isError: result.isError,
@@ -94,7 +136,8 @@ server.registerTool(
   },
   async ({ slug }) => {
     try {
-      const doc = await getDoc(slug);
+      const ctx = readEnvContext();
+      const doc = await fetchDoc(ctx.cardApiUrl, slug);
       if (!doc) {
         return { isError: true, content: [{ type: "text" as const, text: `get_doc: no doc found for slug "${slug}"` }] };
       }
@@ -140,11 +183,7 @@ server.registerTool(
           content: [{ type: "text" as const, text: "create_adr_doc: no card is associated with this agent run, nothing to link the ADR to" }],
         };
       }
-      const doc = await createDoc(
-        { slug, title, docType: "adr", content, summary, tags, message: `implementer: draft ADR "${title}"` },
-        { status: "proposed" },
-      );
-      await db.insert(cardDocLinks).values({ cardId: ctx.cardId, docId: doc.id, linkType: "adr" }).onConflictDoNothing();
+      await createAdrDoc(ctx.cardApiUrl, ctx.cardApiKey, ctx.cardId, { slug, title, summary, content, tags });
       return {
         isError: false,
         content: [

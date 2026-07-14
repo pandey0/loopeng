@@ -1,48 +1,26 @@
 import { Pool } from "pg";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 
-// Regression test for card 438646e5: the sub-agent MCP server process
-// (spawned inside an agent's own worktree, see buildSubAgentMcpConfig in
-// @loopeng/agents) is threaded the loopeng_agent_runs role's credential
-// instead of the full-access DATABASE_URL -- migration 0011/0012 is what
-// actually creates that role and its grants. This connects as that role for
-// real (not a mock) and asserts the grants are exactly what they should be:
-// read/write agent_runs, read-only agent_roles and docs, and nothing else
-// in the shared database.
+// Regression test for card 438646e5: migrations 0011/0012 created a
+// loopeng_agent_runs Postgres role and handed its connection string to the
+// sub-agent MCP server process (spawned inside an agent's own worktree, see
+// buildSubAgentMcpConfig in @loopeng/agents) instead of the full-access
+// DATABASE_URL. That was progress, but it was still a real Postgres
+// credential reachable from an agent-worktree-adjacent process, with
+// grants spanning every card's agent_runs rows (not scoped to the caller's
+// own), and its fixed local-dev password sat in cleartext in .env.example.
+// Migration 0013 revokes it outright: spawn_sub_agent and get_doc now talk
+// to the authenticated API instead (apps/api/src/routes/agent-runs.ts),
+// never a direct DB connection. This asserts the role is actually gone, not
+// just unused -- a credential nothing legitimate points at any more is a
+// straight liability if a future change quietly starts relying on it again.
 const AGENT_RUNS_DATABASE_URL =
   process.env.AGENT_RUNS_DATABASE_URL ?? "postgresql://loopeng_agent_runs:loopeng_agent_runs_dev@localhost:5433/loopeng";
 
-describe("loopeng_agent_runs scoped role", () => {
-  let pool: Pool;
-
-  beforeAll(() => {
-    pool = new Pool({ connectionString: AGENT_RUNS_DATABASE_URL });
-  });
-
-  afterAll(async () => {
+describe("loopeng_agent_runs role (revoked, card 438646e5 migration 0013)", () => {
+  it("no longer exists -- connecting with its old credential fails authentication", async () => {
+    const pool = new Pool({ connectionString: AGENT_RUNS_DATABASE_URL });
+    await expect(pool.query("SELECT 1")).rejects.toThrow(/password authentication failed|role .* does not exist/i);
     await pool.end();
-  });
-
-  it("can read and write agent_runs", async () => {
-    await expect(pool.query("SELECT count(*) FROM agent_runs")).resolves.toBeDefined();
-  });
-
-  it("can read agent_roles and docs", async () => {
-    await expect(pool.query("SELECT count(*) FROM agent_roles")).resolves.toBeDefined();
-    await expect(pool.query("SELECT count(*) FROM docs")).resolves.toBeDefined();
-  });
-
-  it("cannot read cards -- the exact table the 2026-07-03 incident's raw DELETE hit", async () => {
-    await expect(pool.query("SELECT count(*) FROM cards")).rejects.toThrow(/permission denied/);
-  });
-
-  it("cannot mutate cards even if a read happened to be allowed", async () => {
-    await expect(pool.query("DELETE FROM cards")).rejects.toThrow(/permission denied/);
-  });
-
-  it("cannot read event_log, boards, users, or api_keys", async () => {
-    for (const table of ["event_log", "boards", "users", "api_keys"]) {
-      await expect(pool.query(`SELECT count(*) FROM ${table}`)).rejects.toThrow(/permission denied/);
-    }
   });
 });

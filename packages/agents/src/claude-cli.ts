@@ -40,7 +40,7 @@ import { agentRuns, db } from "@loopeng/db";
 const AGENT_ENV_DENYLIST = ["ORCHESTRATOR_ENABLED", "DATABASE_URL", "DB_PORT"] as const;
 
 // `extra` is applied *after* the deny-list strip, never before -- it's how a
-// caller (see roles.ts's cardScopedAgentEnv) hands a run its own narrowly-
+// caller (see roles.ts's runApiKeyEnv) hands a run its own narrowly-
 // scoped credential (a per-run API key, verified server-side, authorized for
 // exactly one card) without reopening the full-access DATABASE_URL the
 // deny-list exists to keep out.

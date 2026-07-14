@@ -314,18 +314,9 @@ importers:
       '@loopeng/agents':
         specifier: workspace:*
         version: link:../agents
-      '@loopeng/db':
-        specifier: workspace:*
-        version: link:../db
-      '@loopeng/doc-engine':
-        specifier: workspace:*
-        version: link:../doc-engine
       '@modelcontextprotocol/sdk':
         specifier: ^1.29.0
         version: 1.29.0(zod@3.25.76)
-      drizzle-orm:
-        specifier: ^0.36.1
-        version: 0.36.4(@types/pg@8.20.0)(@types/react@18.3.31)(pg@8.22.0)(react@18.3.1)
       zod:
         specifier: ^3.25.76
         version: 3.25.76

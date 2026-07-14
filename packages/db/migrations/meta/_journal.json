@@ -92,6 +92,13 @@
       "when": 1783872425266,
       "tag": "0012_grant_agent_runs_docs_select",
       "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1784000000000,
+      "tag": "0013_revoke_agent_runs_role",
+      "breakpoints": true
     }
   ]
 }

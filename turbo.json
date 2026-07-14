@@ -17,7 +17,7 @@
     },
     "test": {
       "dependsOn": ["^build"],
-      "env": ["DATABASE_URL", "AGENT_RUNS_DATABASE_URL", "WEB_API_KEY", "WIKI_REPO_PATH"]
+      "env": ["DATABASE_URL", "WEB_API_KEY", "WIKI_REPO_PATH"]
     }
   }
 }

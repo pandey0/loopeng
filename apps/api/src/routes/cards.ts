@@ -2,6 +2,7 @@ import type { FastifyPluginAsync } from "fastify";
 import { and, desc, eq } from "drizzle-orm";
 import { advanceCard, applyTransition, attachCardStatus, wouldCreateCycle } from "@loopeng/board-engine";
 import { getSessionSnippet, sessionRegistry } from "@loopeng/agents";
+import { createDoc } from "@loopeng/doc-engine";
 import { getActiveWorktree, getRepoDiff } from "@loopeng/worktree-manager";
 import {
   agentRoles,
@@ -17,6 +18,7 @@ import {
   gateResults,
 } from "@loopeng/db";
 import {
+  AdrDocCreateInputSchema,
   AnswerCardQuestionInputSchema,
   CardCreateInputSchema,
   CardTransitionInputSchema,
@@ -360,5 +362,33 @@ export const cardRoutes: FastifyPluginAsync = async (fastify) => {
   fastify.get("/cards/:id/doc-links", async (request) => {
     const { id } = request.params as { id: string };
     return fastify.db.select().from(cardDocLinks).where(eq(cardDocLinks.cardId, id));
+  });
+
+  // Backs create_adr_doc (packages/mcp-subagent/src/server.ts) -- an agent
+  // drafting an ADR needs to both create the doc and link it to its own
+  // card, same trust boundary as doc-links above (requireOwnCard), but as
+  // one authenticated call instead of the agent doing createDoc/db.insert
+  // directly (card 438646e5). status is always "proposed": a human accepts
+  // it afterwards via the docs UI, matching DocCreateInputSchema's own
+  // authorId-never-trusted-from-the-body precedent -- an agent can propose,
+  // never self-accept.
+  fastify.post("/cards/:id/adr-docs", { preHandler: [fastify.requireActor, fastify.requireOwnCard] }, async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const actor = request.actor!;
+    const input = AdrDocCreateInputSchema.parse(request.body);
+    const doc = await createDoc(
+      { slug: input.slug, title: input.title, docType: "adr", content: input.content, summary: input.summary, tags: input.tags, message: `implementer: draft ADR "${input.title}"` },
+      { status: "proposed" },
+    );
+    await fastify.db.insert(cardDocLinks).values({ cardId: id, docId: doc.id, linkType: "adr" }).onConflictDoNothing();
+    await fastify.db.insert(eventLog).values({
+      entityType: "card",
+      entityId: id,
+      eventType: "card.doc_link_added",
+      actorType: actor.type,
+      actorId: actor.id,
+      payload: { docId: doc.id, linkType: "adr", slug: input.slug },
+    });
+    reply.status(201).send({ docId: doc.id });
   });
 };

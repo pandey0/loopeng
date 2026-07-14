@@ -66,6 +66,22 @@ export const DocCreateInputSchema = z.object({
 });
 export type DocCreateInput = z.infer<typeof DocCreateInputSchema>;
 
+// POST /cards/:id/adr-docs's body -- the authenticated route create_adr_doc
+// (packages/mcp-subagent/src/server.ts) calls instead of touching
+// createDoc/db directly (card 438646e5). docType/status/authorId/message
+// aren't caller-supplied: the route fixes docType="adr", status="proposed",
+// authorId=null (no per-agent human identity to attribute it to), and a
+// fixed commit message, the same way DocCreateInputSchema's authorId is
+// never trusted from the request body on POST /docs.
+export const AdrDocCreateInputSchema = z.object({
+  slug: z.string().min(1),
+  title: z.string().min(1),
+  summary: docSummarySchema,
+  content: z.string().min(1),
+  tags: z.array(z.string()).default([]),
+});
+export type AdrDocCreateInput = z.infer<typeof AdrDocCreateInputSchema>;
+
 export const DocUpdateInputSchema = z.object({
   content: z.string(),
   summary: docSummarySchema.optional(),

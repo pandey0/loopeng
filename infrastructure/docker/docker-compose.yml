@@ -21,10 +21,6 @@ services:
       dockerfile: infrastructure/docker/Dockerfile.api
     environment:
       DATABASE_URL: postgresql://loopeng:loopeng@postgres:5432/loopeng
-      # Least-privilege credential threaded into the sub-agent MCP server
-      # subprocess instead of DATABASE_URL above -- see migration 0011 and
-      # the AGENT_RUNS_DATABASE_URL comment in .env.example.
-      AGENT_RUNS_DATABASE_URL: postgresql://loopeng_agent_runs:loopeng_agent_runs_dev@postgres:5432/loopeng
       WEB_API_KEY: ${WEB_API_KEY:-change-me-web-api-key}
       WIKI_REPO_PATH: /data/wiki-repo
       API_PORT: 4000

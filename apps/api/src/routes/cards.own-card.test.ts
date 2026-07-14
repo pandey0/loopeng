@@ -15,7 +15,7 @@ declare module "fastify" {
 
 // Regression test for card 438646e5's core acceptance criterion: an agent
 // worktree's credential is scoped to the one card it was dispatched for
-// (cardScopedAgentEnv in @loopeng/agents mints it that way), so it can no
+// (runApiKeyEnv in @loopeng/agents mints it that way), so it can no
 // longer create/mutate/delete board data outside that card -- and any
 // attempt to do so is itself audited (card.access_denied), not silent, which
 // is exactly the gap the 2026-07-03 incident's raw-DB delete exploited.

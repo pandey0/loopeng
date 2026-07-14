@@ -19,7 +19,7 @@ declare module "fastify" {
     requireHumanActor: (request: FastifyRequest, reply: FastifyReply) => Promise<void>;
     // Authorization on top of requireActor's authentication: an
     // actorType=agent caller is only ever authorized for the one card its
-    // key was minted for (see cardScopedAgentEnv in @loopeng/agents) --
+    // key was minted for (see runApiKeyEnv in @loopeng/agents) --
     // 403s (and writes a card.access_denied event, so the attempt itself is
     // auditable) anything targeting a different :id. No-op for user/
     // automation callers, which aren't scoped to a single card. Must run
