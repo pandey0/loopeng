@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { CardCreateInputSchema, CardSchema, CardUpdateInputSchema } from "./schemas";
+import {
+  CardCreateInputSchema,
+  CardSchema,
+  CardUpdateInputSchema,
+  IntakeInputSchema,
+  MAX_INTAKE_IMAGE_SIZE_BYTES,
+} from "./schemas";
 
 describe("CardSchema", () => {
   it("defaults acceptanceCriteria to an empty array", () => {
@@ -50,6 +56,90 @@ describe("CardCreateInputSchema", () => {
       CardCreateInputSchema.parse({
         boardId: "22222222-2222-2222-2222-222222222222",
         title: "Some card",
+      }),
+    ).toThrow();
+  });
+});
+
+describe("IntakeInputSchema", () => {
+  const boardId = "22222222-2222-2222-2222-222222222222";
+  const base64Of = (sizeBytes: number) => Buffer.alloc(sizeBytes, "a").toString("base64");
+
+  it("accepts a requestText-only payload with no images field", () => {
+    const input = IntakeInputSchema.parse({ boardId, requestText: "do the thing" });
+    expect(input.images).toEqual([]);
+  });
+
+  it("accepts a payload with valid image attachments", () => {
+    const data = base64Of(1024);
+    const input = IntakeInputSchema.parse({
+      boardId,
+      requestText: "see attached screenshot",
+      images: [{ mimeType: "image/png", sizeBytes: 1024, data }],
+    });
+    expect(input.images).toHaveLength(1);
+    expect(input.images[0]?.mimeType).toBe("image/png");
+  });
+
+  it("accepts all allowlisted mime types", () => {
+    for (const mimeType of ["image/png", "image/jpeg", "image/jpg", "image/webp"] as const) {
+      const input = IntakeInputSchema.parse({
+        boardId,
+        requestText: "x",
+        images: [{ mimeType, sizeBytes: 10, data: base64Of(10) }],
+      });
+      expect(input.images[0]?.mimeType).toBe(mimeType);
+    }
+  });
+
+  it("rejects a mime type outside the allowlist", () => {
+    expect(() =>
+      IntakeInputSchema.parse({
+        boardId,
+        requestText: "x",
+        images: [{ mimeType: "image/gif", sizeBytes: 10, data: base64Of(10) }],
+      }),
+    ).toThrow();
+  });
+
+  it("rejects an image over the declared size cap", () => {
+    expect(() =>
+      IntakeInputSchema.parse({
+        boardId,
+        requestText: "x",
+        images: [
+          {
+            mimeType: "image/png",
+            sizeBytes: MAX_INTAKE_IMAGE_SIZE_BYTES + 1,
+            data: base64Of(10),
+          },
+        ],
+      }),
+    ).toThrow();
+  });
+
+  it("rejects when the actual base64 data exceeds the size cap, even if sizeBytes lies under it", () => {
+    expect(() =>
+      IntakeInputSchema.parse({
+        boardId,
+        requestText: "x",
+        images: [
+          {
+            mimeType: "image/png",
+            sizeBytes: 10,
+            data: base64Of(MAX_INTAKE_IMAGE_SIZE_BYTES + 1),
+          },
+        ],
+      }),
+    ).toThrow();
+  });
+
+  it("rejects an empty data string", () => {
+    expect(() =>
+      IntakeInputSchema.parse({
+        boardId,
+        requestText: "x",
+        images: [{ mimeType: "image/png", sizeBytes: 10, data: "" }],
       }),
     ).toThrow();
   });

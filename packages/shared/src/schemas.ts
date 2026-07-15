@@ -218,10 +218,46 @@ export interface CardWithStatus extends Card {
   dependencyInfo: CardDependencyInfo;
 }
 
+// Mirrors what the `claude` CLI's image input accepts -- keep in sync with
+// any future format support added there (see intake-planner-bug-grounding
+// spec doc: images are passed through to the same one-shot planner turn).
+export const ALLOWED_INTAKE_IMAGE_MIME_TYPES = ["image/png", "image/jpeg", "image/jpg", "image/webp"] as const;
+
+// Cap applies per image, not per request -- keeps a single oversized upload
+// from blowing up the planner turn's payload without capping how many
+// (reasonably sized) images a user can attach.
+export const MAX_INTAKE_IMAGE_SIZE_BYTES = 5 * 1024 * 1024; // 5MB
+
+// Decoded size of a base64 string, without pulling in a Buffer/Node
+// dependency -- this schema is imported by apps/web too.
+function base64ByteLength(data: string): number {
+  const normalized = data.replace(/\s/g, "");
+  const padding = normalized.endsWith("==") ? 2 : normalized.endsWith("=") ? 1 : 0;
+  return Math.floor((normalized.length * 3) / 4) - padding;
+}
+
+export const IntakeImageSchema = z
+  .object({
+    mimeType: z.enum(ALLOWED_INTAKE_IMAGE_MIME_TYPES),
+    sizeBytes: z
+      .number()
+      .int()
+      .positive()
+      .max(MAX_INTAKE_IMAGE_SIZE_BYTES, `image exceeds max size of ${MAX_INTAKE_IMAGE_SIZE_BYTES} bytes`),
+    // Inline base64-encoded image bytes (no data: URL prefix).
+    data: z.string().min(1),
+  })
+  .refine((image) => base64ByteLength(image.data) <= MAX_INTAKE_IMAGE_SIZE_BYTES, {
+    message: `image data exceeds max size of ${MAX_INTAKE_IMAGE_SIZE_BYTES} bytes`,
+    path: ["data"],
+  });
+export type IntakeImage = z.infer<typeof IntakeImageSchema>;
+
 export const IntakeInputSchema = z.object({
   boardId: uuid,
   requestText: z.string().min(1),
   requestedById: uuid.optional(),
+  images: z.array(IntakeImageSchema).default([]),
 });
 export type IntakeInput = z.infer<typeof IntakeInputSchema>;
 
