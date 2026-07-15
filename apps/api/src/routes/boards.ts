@@ -13,7 +13,7 @@ export const boardRoutes: FastifyPluginAsync = async (fastify) => {
     return fastify.db.select().from(boards);
   });
 
-  fastify.post("/boards", async (request, reply) => {
+  fastify.post("/boards", { preHandler: fastify.requireHumanActor }, async (request, reply) => {
     const input = CreateBoardSchema.parse(request.body);
     const [board] = await fastify.db.insert(boards).values(input).returning();
     reply.status(201).send(board);

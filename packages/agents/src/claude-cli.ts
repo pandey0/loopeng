@@ -15,19 +15,39 @@ import { agentRuns, db } from "@loopeng/db";
 // it stays in the same process group -- signaling the *group* (negative pid)
 // reaches it even after the CLI's own PID has already exited and the job has
 // been reparented to init.
-// Every claude CLI child inherits this process's env by default (cwd/
-// DATABASE_URL/etc. all need to pass through) -- except ORCHESTRATOR_ENABLED,
-// which must never leak to a spawned child no matter what. An implementer's
-// Bash tool can itself spawn a worktree-local `apps/api` dev server (see the
-// module comment above on killProcessGroup, and the 2026-07-02 incident it
-// documents) -- if that grandchild process inherited ORCHESTRATOR_ENABLED=1
-// from this one, it would auto-start a second dispatcher racing the real
-// one, defeating the whole point of the flag being opt-in. Confirmed live:
-// exactly this leak happened once ORCHESTRATOR_ENABLED=1 was set on the real
-// instance's env for the first time.
-function agentSpawnEnv(): NodeJS.ProcessEnv {
-  const { ORCHESTRATOR_ENABLED: _dropped, ...rest } = process.env;
-  return rest;
+// Every claude CLI child inherits this process's env by default, MINUS a
+// deny-list of vars that must never reach an agent's own worktree process
+// tree:
+//
+// - ORCHESTRATOR_ENABLED: an implementer's Bash tool can itself spawn a
+//   worktree-local `apps/api` dev server (see the module comment above on
+//   killProcessGroup, and the 2026-07-02 incident it documents) -- if that
+//   grandchild process inherited ORCHESTRATOR_ENABLED=1 from this one, it
+//   would auto-start a second dispatcher racing the real one, defeating the
+//   whole point of the flag being opt-in. Confirmed live: exactly this leak
+//   happened once ORCHESTRATOR_ENABLED=1 was set on the real instance's env
+//   for the first time.
+// - DATABASE_URL / DB_PORT: an agent's Bash tool otherwise has a full-access
+//   Postgres credential sitting in its own environment, reachable with
+//   nothing more than `psql $DATABASE_URL` -- this is exactly how the
+//   2026-07-03 incident happened (card 438646e5): an implementer created a
+//   card through the API self-attributed as a human action, then deleted it
+//   with a raw DB write that left no event_log trace at all, since no
+//   DELETE route (and therefore no audit path) exists for it. State
+//   mutations must go through the API, whose auth boundary can actually
+//   attribute and log who did what -- an agent worktree has no legitimate
+//   reason to hold a credential that bypasses that boundary entirely.
+const AGENT_ENV_DENYLIST = ["ORCHESTRATOR_ENABLED", "DATABASE_URL", "DB_PORT"] as const;
+
+// `extra` is applied *after* the deny-list strip, never before -- it's how a
+// caller (see roles.ts's runApiKeyEnv) hands a run its own narrowly-
+// scoped credential (a per-run API key, verified server-side, authorized for
+// exactly one card) without reopening the full-access DATABASE_URL the
+// deny-list exists to keep out.
+export function agentSpawnEnv(extra?: Record<string, string>): NodeJS.ProcessEnv {
+  const rest = { ...process.env };
+  for (const key of AGENT_ENV_DENYLIST) delete rest[key];
+  return extra ? { ...rest, ...extra } : rest;
 }
 
 export function killProcessGroup(pid: number, signal: NodeJS.Signals = "SIGTERM"): void {
@@ -58,6 +78,8 @@ export interface RunClaudeCliInput {
   maxBudgetUsd?: number;
   /** MCP server config (e.g. sub-agent delegation), passed inline as JSON via --mcp-config. */
   mcpConfig?: Record<string, unknown>;
+  /** Extra env vars merged onto the spawned child's env after the deny-list strip (see agentSpawnEnv). */
+  env?: Record<string, string>;
 }
 
 export interface ClaudeCliResult {
@@ -83,7 +105,7 @@ export function runClaudeCli(input: RunClaudeCliInput): Promise<ClaudeCliResult>
   if (input.mcpConfig) args.push("--mcp-config", JSON.stringify(input.mcpConfig));
 
   return new Promise((resolve, reject) => {
-    const child = spawn("claude", args, { cwd: input.cwd, env: agentSpawnEnv(), detached: true });
+    const child = spawn("claude", args, { cwd: input.cwd, env: agentSpawnEnv(input.env), detached: true });
 
     let stdout = "";
     let stderr = "";
@@ -143,6 +165,8 @@ export interface RunClaudeCliStreamingInput {
   disallowedTools?: string[];
   model?: string;
   mcpConfig?: Record<string, unknown>;
+  /** Extra env vars merged onto the spawned child's env after the deny-list strip (see agentSpawnEnv). */
+  env?: Record<string, string>;
 }
 
 export interface StreamingSession {
@@ -211,7 +235,7 @@ export function runClaudeCliStreaming(input: RunClaudeCliStreamingInput): Stream
   if (input.appendSystemPrompt) args.push("--append-system-prompt", input.appendSystemPrompt);
   if (input.mcpConfig) args.push("--mcp-config", JSON.stringify(input.mcpConfig));
 
-  const child = spawn("claude", args, { cwd: input.cwd, env: agentSpawnEnv(), detached: true });
+  const child = spawn("claude", args, { cwd: input.cwd, env: agentSpawnEnv(input.env), detached: true });
 
   const handlers = new Set<StreamEventHandler>();
   const appendTranscript = makeTranscriptAppender(input.agentRunId);

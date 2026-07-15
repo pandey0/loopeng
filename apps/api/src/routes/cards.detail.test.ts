@@ -3,6 +3,7 @@ import { eq } from "drizzle-orm";
 import { agentRoles, agentRuns, boards, cards, db, pool } from "@loopeng/db";
 import { sessionRegistry, type StreamingSession } from "@loopeng/agents";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { authPlugin } from "../plugins/auth.js";
 import { cardRoutes } from "./cards.js";
 
 declare module "fastify" {
@@ -36,6 +37,7 @@ describe("GET /cards/:id/detail agent runs", () => {
   beforeAll(async () => {
     app = Fastify();
     app.decorate("db", db);
+    await app.register(authPlugin);
     await app.register(cardRoutes);
 
     const [board] = await db.insert(boards).values({ name: "card-d detail test board" }).returning({ id: boards.id });

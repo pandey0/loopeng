@@ -63,7 +63,7 @@ export const intakeRoutes: FastifyPluginAsync = async (fastify) => {
     return rows;
   });
 
-  fastify.post("/boards/:id/intake", async (request, reply) => {
+  fastify.post("/boards/:id/intake", { preHandler: fastify.requireHumanActor }, async (request, reply) => {
     const { id: boardId } = request.params as { id: string };
     const input = IntakeInputSchema.parse({ ...(request.body as object), boardId });
 
@@ -172,8 +172,9 @@ export const intakeRoutes: FastifyPluginAsync = async (fastify) => {
   // one-time manager review intake always did -- not awaited, same reasoning
   // as before: the response shouldn't block on a second agent run when the
   // real cards already exist and are visible on the board immediately.
-  fastify.post("/boards/:id/intake/:agentRunId/approve", async (request, reply) => {
+  fastify.post("/boards/:id/intake/:agentRunId/approve", { preHandler: fastify.requireHumanActor }, async (request, reply) => {
     const { id: boardId, agentRunId } = request.params as { id: string; agentRunId: string };
+    const actor = request.actor!;
 
     let persisted: Awaited<ReturnType<typeof approvePlannerPlan>>;
     try {
@@ -184,11 +185,17 @@ export const intakeRoutes: FastifyPluginAsync = async (fastify) => {
       return;
     }
 
+    // actorType/actorId come from the verified caller (requireHumanActor
+    // guarantees actorType=user here), never hardcoded -- this is the same
+    // card-creation path the 2026-07-03 incident (card 438646e5) exploited
+    // elsewhere: an unauthenticated POST that silently recorded a hardcoded
+    // "user" attribution regardless of who actually called it.
     await fastify.db.insert(eventLog).values({
       entityType: "card",
       entityId: persisted.epicCardId,
       eventType: "card.intake_decomposed",
-      actorType: "user",
+      actorType: actor.type,
+      actorId: actor.id,
       payload: { agentRunId: persisted.agentRunId, epicCardId: persisted.epicCardId, cardIds: persisted.cardIds, specDocId: persisted.specDocId },
     });
 

@@ -2,6 +2,7 @@ import type { FastifyPluginAsync } from "fastify";
 import { and, desc, eq } from "drizzle-orm";
 import { advanceCard, applyTransition, attachCardStatus, wouldCreateCycle } from "@loopeng/board-engine";
 import { getSessionSnippet, sessionRegistry } from "@loopeng/agents";
+import { createDoc } from "@loopeng/doc-engine";
 import { getActiveWorktree, getRepoDiff } from "@loopeng/worktree-manager";
 import {
   agentRoles,
@@ -17,6 +18,7 @@ import {
   gateResults,
 } from "@loopeng/db";
 import {
+  AdrDocCreateInputSchema,
   AnswerCardQuestionInputSchema,
   CardCreateInputSchema,
   CardTransitionInputSchema,
@@ -38,8 +40,15 @@ export const cardRoutes: FastifyPluginAsync = async (fastify) => {
     return attachCardStatus(cardRows, { isRunLive, getSnippet: getSessionSnippet });
   });
 
-  fastify.post("/cards", async (request, reply) => {
+  // Human-only (card 438646e5): a new card has no existing owner to scope an
+  // agent credential to, so it's board-shaping in the same sense boards/
+  // projects/docs creation is -- this is also the exact route the
+  // 2026-07-03 incident abused (an implementer minting an unrelated card to
+  // "prove" an acceptance criterion). requireOwnCard can't help here since
+  // there's no :id yet to check against the caller's run.
+  fastify.post("/cards", { preHandler: fastify.requireHumanActor }, async (request, reply) => {
     const { specDocId, ...cardInput } = CardCreateInputSchema.parse(request.body);
+    const actor = request.actor!;
 
     const [specDoc] = await fastify.db.select({ id: docs.id }).from(docs).where(eq(docs.id, specDocId));
     if (!specDoc) {
@@ -47,13 +56,23 @@ export const cardRoutes: FastifyPluginAsync = async (fastify) => {
       return;
     }
 
-    // Insert card + spec link together so a card can never exist without the
-    // link that docs_adr_linked will require of it anyway -- no window where
-    // a half-created card sits linkless if the process dies between the two.
+    // Insert card + spec link + the card.created audit event together so a
+    // card can never exist without the link that docs_adr_linked will
+    // require of it anyway, or without a trace of who created it -- no
+    // window where a half-created (or unaudited) card sits reachable if the
+    // process dies partway through.
     const card = await fastify.db.transaction(async (tx) => {
       const [inserted] = await tx.insert(cards).values(cardInput).returning();
       if (!inserted) throw new Error("card insert returned no row");
       await tx.insert(cardDocLinks).values({ cardId: inserted.id, docId: specDocId, linkType: "spec" });
+      await tx.insert(eventLog).values({
+        entityType: "card",
+        entityId: inserted.id,
+        eventType: "card.created",
+        actorType: actor.type,
+        actorId: actor.id,
+        payload: { title: inserted.title, boardId: inserted.boardId },
+      });
       return inserted;
     });
 
@@ -70,9 +89,10 @@ export const cardRoutes: FastifyPluginAsync = async (fastify) => {
     return card;
   });
 
-  fastify.patch("/cards/:id", async (request, reply) => {
+  fastify.patch("/cards/:id", { preHandler: [fastify.requireActor, fastify.requireOwnCard] }, async (request, reply) => {
     const { id } = request.params as { id: string };
     const input = CardUpdateInputSchema.parse(request.body);
+    const actor = request.actor!;
     const [card] = await fastify.db
       .update(cards)
       .set({ ...input, updatedAt: new Date() })
@@ -82,6 +102,14 @@ export const cardRoutes: FastifyPluginAsync = async (fastify) => {
       reply.status(404).send({ error: "not_found" });
       return;
     }
+    await fastify.db.insert(eventLog).values({
+      entityType: "card",
+      entityId: id,
+      eventType: "card.updated",
+      actorType: actor.type,
+      actorId: actor.id,
+      payload: { fields: Object.keys(input) },
+    });
     return card;
   });
 
@@ -172,10 +200,15 @@ export const cardRoutes: FastifyPluginAsync = async (fastify) => {
     return { diff };
   });
 
-  fastify.post("/cards/:id/transition", async (request, reply) => {
+  fastify.post("/cards/:id/transition", { preHandler: [fastify.requireActor, fastify.requireOwnCard] }, async (request, reply) => {
     const { id } = request.params as { id: string };
     const input = CardTransitionInputSchema.parse(request.body);
-    const card = await applyTransition({ cardId: id, ...input });
+    const actor = request.actor!;
+    // actorType/actorId come from the verified caller, never from the
+    // request body -- see card 438646e5 (any caller could previously
+    // self-report actorType=user here, which is indistinguishable from a
+    // real human action once it lands in event_log).
+    const card = await applyTransition({ cardId: id, toState: input.toState, reason: input.reason, actorType: actor.type, actorId: actor.id ?? undefined });
     reply.send(card);
   });
 
@@ -186,9 +219,10 @@ export const cardRoutes: FastifyPluginAsync = async (fastify) => {
   // orchestrator triggers and card.moved history fire identically either
   // way. CardNotFoundError/NoNextStateError/InvalidTransitionError/
   // ConcurrentTransitionError all bubble to the global error handler.
-  fastify.post("/cards/:id/advance", async (request, reply) => {
+  fastify.post("/cards/:id/advance", { preHandler: [fastify.requireActor, fastify.requireOwnCard] }, async (request, reply) => {
     const { id } = request.params as { id: string };
-    const card = await advanceCard({ cardId: id, actorType: "user" });
+    const actor = request.actor!;
+    const card = await advanceCard({ cardId: id, actorType: actor.type, actorId: actor.id ?? undefined });
     reply.send(card);
   });
 
@@ -196,7 +230,7 @@ export const cardRoutes: FastifyPluginAsync = async (fastify) => {
   // triggers dispatch cards automatically, but this lets a human (or a
   // test) force a specific ready card through implementer -> reviewer ->
   // gate_checks without waiting for a schedule.
-  fastify.post("/cards/:id/dispatch", async (request, reply) => {
+  fastify.post("/cards/:id/dispatch", { preHandler: [fastify.requireActor, fastify.requireOwnCard] }, async (request, reply) => {
     const { id } = request.params as { id: string };
     await fastify.orchestrator.coordination.dispatch(id);
     reply.status(202).send({ dispatched: id });
@@ -213,8 +247,9 @@ export const cardRoutes: FastifyPluginAsync = async (fastify) => {
   // attempt) to make this stick -- without that guard, a still-in-flight
   // attempt's own retry logic would just spawn another implementer call
   // against a card that already moved off in_progress.
-  fastify.post("/cards/:id/stop", async (request, reply) => {
+  fastify.post("/cards/:id/stop", { preHandler: [fastify.requireActor, fastify.requireOwnCard] }, async (request, reply) => {
     const { id } = request.params as { id: string };
+    const actor = request.actor!;
     const [card] = await db.select().from(cards).where(eq(cards.id, id));
     if (!card) {
       reply.status(404).send({ error: "not_found" });
@@ -227,7 +262,7 @@ export const cardRoutes: FastifyPluginAsync = async (fastify) => {
 
     const input = request.body as { reason?: string } | undefined;
     const reason = input?.reason?.trim() || "stopped by user";
-    await applyTransition({ cardId: id, toState: "blocked", actorType: "user", reason });
+    await applyTransition({ cardId: id, toState: "blocked", actorType: actor.type, actorId: actor.id ?? undefined, reason });
 
     const [liveRun] = await db
       .select({ id: agentRuns.id })
@@ -243,8 +278,9 @@ export const cardRoutes: FastifyPluginAsync = async (fastify) => {
   // Human answers a card_questions escalation (spec: card-questions-escalation).
   // Auto-resumes the card blocked -> ready so it redispatches on the next
   // event-trigger tick, with the Q&A injected into the implementer's prompt.
-  fastify.post("/cards/:id/questions/:questionId/answer", async (request, reply) => {
+  fastify.post("/cards/:id/questions/:questionId/answer", { preHandler: [fastify.requireActor, fastify.requireOwnCard] }, async (request, reply) => {
     const { id, questionId } = request.params as { id: string; questionId: string };
+    const actor = request.actor!;
     const input = AnswerCardQuestionInputSchema.parse(request.body);
 
     const [question] = await fastify.db.select().from(cardQuestions).where(eq(cardQuestions.id, questionId));
@@ -265,14 +301,15 @@ export const cardRoutes: FastifyPluginAsync = async (fastify) => {
 
     const [card] = await fastify.db.select().from(cards).where(eq(cards.id, id));
     if (card?.state === "blocked") {
-      await applyTransition({ cardId: id, toState: "ready", actorType: "user" });
+      await applyTransition({ cardId: id, toState: "ready", actorType: actor.type, actorId: actor.id ?? undefined });
     }
 
     reply.send(updated);
   });
 
-  fastify.post("/cards/:id/dependencies", async (request, reply) => {
+  fastify.post("/cards/:id/dependencies", { preHandler: [fastify.requireActor, fastify.requireOwnCard] }, async (request, reply) => {
     const { id } = request.params as { id: string };
+    const actor = request.actor!;
     const input = CardDependencySchema.omit({ cardId: true }).parse(request.body);
 
     if (input.dependencyType === "blocks" || !input.dependencyType) {
@@ -287,6 +324,14 @@ export const cardRoutes: FastifyPluginAsync = async (fastify) => {
       .insert(cardDependencies)
       .values({ cardId: id, dependsOnCardId: input.dependsOnCardId, dependencyType: input.dependencyType })
       .returning();
+    await fastify.db.insert(eventLog).values({
+      entityType: "card",
+      entityId: id,
+      eventType: "card.dependency_added",
+      actorType: actor.type,
+      actorId: actor.id,
+      payload: { dependsOnCardId: input.dependsOnCardId, dependencyType: input.dependencyType },
+    });
     reply.status(201).send(edge);
   });
 
@@ -295,18 +340,55 @@ export const cardRoutes: FastifyPluginAsync = async (fastify) => {
     return fastify.db.select().from(cardDependencies).where(eq(cardDependencies.cardId, id));
   });
 
-  fastify.post("/cards/:id/doc-links", async (request, reply) => {
+  fastify.post("/cards/:id/doc-links", { preHandler: [fastify.requireActor, fastify.requireOwnCard] }, async (request, reply) => {
     const { id } = request.params as { id: string };
+    const actor = request.actor!;
     const input = CardDocLinkSchema.omit({ cardId: true }).parse(request.body);
     const [link] = await fastify.db
       .insert(cardDocLinks)
       .values({ cardId: id, docId: input.docId, linkType: input.linkType })
       .returning();
+    await fastify.db.insert(eventLog).values({
+      entityType: "card",
+      entityId: id,
+      eventType: "card.doc_link_added",
+      actorType: actor.type,
+      actorId: actor.id,
+      payload: { docId: input.docId, linkType: input.linkType },
+    });
     reply.status(201).send(link);
   });
 
   fastify.get("/cards/:id/doc-links", async (request) => {
     const { id } = request.params as { id: string };
     return fastify.db.select().from(cardDocLinks).where(eq(cardDocLinks.cardId, id));
+  });
+
+  // Backs create_adr_doc (packages/mcp-subagent/src/server.ts) -- an agent
+  // drafting an ADR needs to both create the doc and link it to its own
+  // card, same trust boundary as doc-links above (requireOwnCard), but as
+  // one authenticated call instead of the agent doing createDoc/db.insert
+  // directly (card 438646e5). status is always "proposed": a human accepts
+  // it afterwards via the docs UI, matching DocCreateInputSchema's own
+  // authorId-never-trusted-from-the-body precedent -- an agent can propose,
+  // never self-accept.
+  fastify.post("/cards/:id/adr-docs", { preHandler: [fastify.requireActor, fastify.requireOwnCard] }, async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const actor = request.actor!;
+    const input = AdrDocCreateInputSchema.parse(request.body);
+    const doc = await createDoc(
+      { slug: input.slug, title: input.title, docType: "adr", content: input.content, summary: input.summary, tags: input.tags, message: `implementer: draft ADR "${input.title}"` },
+      { status: "proposed" },
+    );
+    await fastify.db.insert(cardDocLinks).values({ cardId: id, docId: doc.id, linkType: "adr" }).onConflictDoNothing();
+    await fastify.db.insert(eventLog).values({
+      entityType: "card",
+      entityId: id,
+      eventType: "card.doc_link_added",
+      actorType: actor.type,
+      actorId: actor.id,
+      payload: { docId: doc.id, linkType: "adr", slug: input.slug },
+    });
+    reply.status(201).send({ docId: doc.id });
   });
 };

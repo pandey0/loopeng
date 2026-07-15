@@ -66,6 +66,22 @@ export const DocCreateInputSchema = z.object({
 });
 export type DocCreateInput = z.infer<typeof DocCreateInputSchema>;
 
+// POST /cards/:id/adr-docs's body -- the authenticated route create_adr_doc
+// (packages/mcp-subagent/src/server.ts) calls instead of touching
+// createDoc/db directly (card 438646e5). docType/status/authorId/message
+// aren't caller-supplied: the route fixes docType="adr", status="proposed",
+// authorId=null (no per-agent human identity to attribute it to), and a
+// fixed commit message, the same way DocCreateInputSchema's authorId is
+// never trusted from the request body on POST /docs.
+export const AdrDocCreateInputSchema = z.object({
+  slug: z.string().min(1),
+  title: z.string().min(1),
+  summary: docSummarySchema,
+  content: z.string().min(1),
+  tags: z.array(z.string()).default([]),
+});
+export type AdrDocCreateInput = z.infer<typeof AdrDocCreateInputSchema>;
+
 export const DocUpdateInputSchema = z.object({
   content: z.string(),
   summary: docSummarySchema.optional(),
@@ -261,10 +277,11 @@ export const IntakeInputSchema = z.object({
 });
 export type IntakeInput = z.infer<typeof IntakeInputSchema>;
 
+// actorType/actorId are deliberately NOT client input here (card 438646e5):
+// the API derives them server-side from the caller's verified API key
+// (see requireActor in apps/api), never from a self-reported body field.
 export const CardTransitionInputSchema = z.object({
   toState: z.enum(CARD_STATES),
-  actorType: z.enum(["user", "agent", "automation"]).default("user"),
-  actorId: uuid.optional(),
   // Recorded on the card.moved event itself -- the *only* place a reason
   // survives once the card leaves the state it explains (e.g. blockedReason
   // is derived live from current gate/agent-run rows, so it's gone the

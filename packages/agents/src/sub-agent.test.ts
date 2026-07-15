@@ -16,6 +16,8 @@ describe("buildSubAgentMcpConfig", () => {
       cwd: "/some/worktree/path",
       depth: 1,
       disallowedTools: ["Edit", "Write"],
+      cardApiKey: "lk_test-key",
+      cardApiUrl: "http://localhost:4000",
     });
 
     const servers = (config as { mcpServers: Record<string, unknown> }).mcpServers;
@@ -30,7 +32,37 @@ describe("buildSubAgentMcpConfig", () => {
       LOOPENG_CWD: "/some/worktree/path",
       LOOPENG_DELEGATION_DEPTH: "1",
       LOOPENG_DISALLOWED_TOOLS: "Edit,Write",
+      CARD_API_KEY: "lk_test-key",
+      CARD_API_URL: "http://localhost:4000",
     });
+  });
+
+  // Regression test for card 438646e5: this subprocess used to be handed a
+  // real Postgres connection string directly (first the full-access
+  // DATABASE_URL, then the scoped-but-still-table-wide loopeng_agent_runs
+  // role under the same env var name) -- an agent worktree's own MCP server
+  // having any kind of direct DB credential is exactly the same class of gap
+  // as the incident's raw-DB delete, just one hop further from the agent's
+  // own Bash tool, and that role's grants weren't even scoped to the
+  // caller's own card. It now only ever gets a single-run-scoped API key
+  // (migration 0013 revoked the role entirely) -- assert no DATABASE_URL of
+  // any kind is ever forwarded, under any env var name.
+  it("never forwards any DATABASE_URL -- only a single-run-scoped API key", () => {
+    const config = buildSubAgentMcpConfig({
+      parentAgentRunId: "run-1",
+      cardId: null,
+      worktreeId: null,
+      cwd: "/repo",
+      depth: 1,
+      cardApiKey: "lk_run-1-key",
+      cardApiUrl: "http://localhost:4000",
+    });
+    const env = (config as { mcpServers: { subagent: { env: Record<string, string> } } }).mcpServers.subagent.env;
+
+    expect(env.DATABASE_URL).toBeUndefined();
+    expect(env.AGENT_RUNS_DATABASE_URL).toBeUndefined();
+    expect(env.CARD_API_KEY).toBe("lk_run-1-key");
+    expect(env.CARD_API_URL).toBe("http://localhost:4000");
   });
 
   it("omits card/worktree ids and disallowed tools cleanly when absent", () => {
@@ -40,6 +72,8 @@ describe("buildSubAgentMcpConfig", () => {
       worktreeId: null,
       cwd: "/repo",
       depth: 1,
+      cardApiKey: "lk_run-1-key",
+      cardApiUrl: "http://localhost:4000",
     });
     const subagent = (config as { mcpServers: { subagent: { env: Record<string, string> } } }).mcpServers.subagent;
     expect(subagent.env.LOOPENG_CARD_ID).toBe("");
@@ -49,10 +83,10 @@ describe("buildSubAgentMcpConfig", () => {
 });
 
 // This depth guard is the structural protection against runaway recursive
-// delegation — it must reject *before* touching the DB or spawning a process,
-// so a run stuck past the cap fails fast instead of hanging.
+// delegation — it must reject *before* creating an agent run or spawning a
+// process, so a run stuck past the cap fails fast instead of hanging.
 describe("spawnSubAgent depth guard", () => {
-  it("refuses to spawn past MAX_DELEGATION_DEPTH without inserting a row or spawning a process", async () => {
+  it("refuses to spawn past MAX_DELEGATION_DEPTH without creating a run or spawning a process", async () => {
     const bogusParentId = "00000000-0000-0000-0000-000000000000";
 
     await expect(
@@ -64,6 +98,8 @@ describe("spawnSubAgent depth guard", () => {
         depth: MAX_DELEGATION_DEPTH + 1,
         task: "this should never run",
         context: "",
+        cardApiKey: "lk_unused",
+        cardApiUrl: "http://localhost:4000",
       }),
     ).rejects.toThrow(SubAgentDepthExceededError);
 

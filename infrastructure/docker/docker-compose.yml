@@ -3,7 +3,16 @@ services:
     image: postgres:16-alpine
     environment:
       POSTGRES_USER: loopeng
-      POSTGRES_PASSWORD: loopeng
+      # Card 438646e5: this used to be a bare literal, hardcoded in this
+      # committed file -- identical to the value in .env.example, so any
+      # agent worktree (or anyone else with repo read access) could recover
+      # the real password for "the one real instance" with a plain file
+      # read, no different from a plaintext secret sitting in source. Same
+      # ${VAR:-default} pattern as WEB_API_KEY below: a real deployment sets
+      # DB_PASSWORD via infrastructure/docker/.env (gitignored, never
+      # committed), so its actual value is never reconstructable from
+      # anything in this repo.
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-loopeng}
       POSTGRES_DB: loopeng
     volumes:
       - pgdata:/var/lib/postgresql/data
@@ -20,7 +29,8 @@ services:
       context: ../..
       dockerfile: infrastructure/docker/Dockerfile.api
     environment:
-      DATABASE_URL: postgresql://loopeng:loopeng@postgres:5432/loopeng
+      DATABASE_URL: postgresql://loopeng:${DB_PASSWORD:-loopeng}@postgres:5432/loopeng
+      WEB_API_KEY: ${WEB_API_KEY:-change-me-web-api-key}
       WIKI_REPO_PATH: /data/wiki-repo
       API_PORT: 4000
       # This is the one real instance -- the only place ORCHESTRATOR_ENABLED
@@ -47,6 +57,7 @@ services:
       dockerfile: infrastructure/docker/Dockerfile.web
       args:
         NEXT_PUBLIC_API_URL: http://localhost:${API_PORT:-4000}
+        NEXT_PUBLIC_WEB_API_KEY: ${WEB_API_KEY:-change-me-web-api-key}
     environment:
       NEXT_PUBLIC_API_URL: http://localhost:${API_PORT:-4000}
     ports:

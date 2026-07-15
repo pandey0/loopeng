@@ -6,7 +6,9 @@ import { simpleGit } from "simple-git";
 import { eq } from "drizzle-orm";
 import { boards, db, pool, projects } from "@loopeng/db";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { authPlugin } from "../plugins/auth.js";
 import { errorHandlerPlugin } from "../plugins/error-handler.js";
+import { authHeaderFor } from "../test-helpers/auth.js";
 import { projectRoutes } from "./projects.js";
 
 declare module "fastify" {
@@ -18,6 +20,7 @@ declare module "fastify" {
 describe("POST /projects", () => {
   let app: FastifyInstance;
   let validRepoPath: string;
+  let humanHeader: { Authorization: string };
   const createdProjectIds: string[] = [];
   const createdBoardIds: string[] = [];
 
@@ -25,11 +28,13 @@ describe("POST /projects", () => {
     app = Fastify();
     app.decorate("db", db);
     await app.register(errorHandlerPlugin);
+    await app.register(authPlugin);
     await app.register(projectRoutes);
 
     validRepoPath = await mkdtemp(path.join(tmpdir(), "projects-route-test-"));
     const git = simpleGit(validRepoPath);
     await git.init();
+    humanHeader = await authHeaderFor("user");
   });
 
   afterAll(async () => {
@@ -46,6 +51,7 @@ describe("POST /projects", () => {
       const response = await app.inject({
         method: "POST",
         url: "/projects",
+        headers: humanHeader,
         payload: { name: "Bad Project", repoPath: notARepo },
       });
       expect(response.statusCode).toBe(400);
@@ -64,6 +70,7 @@ describe("POST /projects", () => {
     const response = await app.inject({
       method: "POST",
       url: "/projects",
+      headers: humanHeader,
       payload: { name: "Nonexistent Project", repoPath: "/definitely/does/not/exist/anywhere" },
     });
     expect(response.statusCode).toBe(400);
@@ -74,6 +81,7 @@ describe("POST /projects", () => {
     const response = await app.inject({
       method: "POST",
       url: "/projects",
+      headers: humanHeader,
       payload: { name: "Good Project", repoPath: validRepoPath },
     });
     expect(response.statusCode).toBe(201);
@@ -86,5 +94,44 @@ describe("POST /projects", () => {
 
     const [boardRow] = await db.select().from(boards).where(eq(boards.id, body.board.id));
     expect(boardRow?.projectId).toBe(body.project.id);
+  });
+
+  it("401s an unauthenticated create, and creates nothing", async () => {
+    const response = await app.inject({
+      method: "POST",
+      url: "/projects",
+      payload: { name: "Unauthenticated Project", repoPath: validRepoPath },
+    });
+    expect(response.statusCode).toBe(401);
+    const rows = await db.select().from(projects).where(eq(projects.name, "Unauthenticated Project"));
+    expect(rows).toHaveLength(0);
+  });
+
+  it("403s an agent-scoped caller trying to create a project -- only a verified human may", async () => {
+    const agentHeader = await authHeaderFor("agent", "00000000-0000-0000-0000-0000000000ff");
+    const response = await app.inject({
+      method: "POST",
+      url: "/projects",
+      headers: agentHeader,
+      payload: { name: "Agent-created Project", repoPath: validRepoPath },
+    });
+    expect(response.statusCode).toBe(403);
+    const rows = await db.select().from(projects).where(eq(projects.name, "Agent-created Project"));
+    expect(rows).toHaveLength(0);
+  });
+
+  it("401s an unauthenticated reanalyze call", async () => {
+    const response = await app.inject({ method: "POST", url: "/projects/00000000-0000-0000-0000-000000000000/reanalyze" });
+    expect(response.statusCode).toBe(401);
+  });
+
+  it("403s an agent-scoped caller's reanalyze call", async () => {
+    const agentHeader = await authHeaderFor("agent", "00000000-0000-0000-0000-0000000000ff");
+    const response = await app.inject({
+      method: "POST",
+      url: "/projects/00000000-0000-0000-0000-000000000000/reanalyze",
+      headers: agentHeader,
+    });
+    expect(response.statusCode).toBe(403);
   });
 });
