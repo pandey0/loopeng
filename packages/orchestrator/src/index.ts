@@ -14,6 +14,7 @@ export * from "./coordination/types.js";
 export { HierarchicalStrategy } from "./coordination/hierarchical.js";
 export { MeshStrategy } from "./coordination/mesh.js";
 export { reconcileOrphanedRuns, reconcileRateLimitedCards, startRateLimitReconcileLoop } from "./reconcile.js";
+export { reconcileStuckDeploys } from "@loopeng/deploy-engine";
 
 export interface Orchestrator {
   coordination: CoordinationStrategy;

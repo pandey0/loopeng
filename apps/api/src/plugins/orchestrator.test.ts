@@ -4,11 +4,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const startOrchestrator = vi.fn();
 const reconcileOrphanedRuns = vi.fn().mockResolvedValue(0);
 const reconcileRateLimitedCards = vi.fn().mockResolvedValue(0);
+const reconcileStuckDeploys = vi.fn().mockResolvedValue(0);
 
 vi.mock("@loopeng/orchestrator", () => ({
   startOrchestrator: (...args: unknown[]) => startOrchestrator(...args),
   reconcileOrphanedRuns: (...args: unknown[]) => reconcileOrphanedRuns(...args),
   reconcileRateLimitedCards: (...args: unknown[]) => reconcileRateLimitedCards(...args),
+  reconcileStuckDeploys: (...args: unknown[]) => reconcileStuckDeploys(...args),
 }));
 
 // Regression test for the 2026-07-02 incident: a worktree-local copy of
@@ -35,6 +37,8 @@ describe("orchestratorPlugin", () => {
     reconcileOrphanedRuns.mockResolvedValue(0);
     reconcileRateLimitedCards.mockReset();
     reconcileRateLimitedCards.mockResolvedValue(0);
+    reconcileStuckDeploys.mockReset();
+    reconcileStuckDeploys.mockResolvedValue(0);
   });
 
   afterEach(() => {
@@ -60,6 +64,7 @@ describe("orchestratorPlugin", () => {
       // alive under the real instance right now.
       expect(reconcileOrphanedRuns).not.toHaveBeenCalled();
       expect(reconcileRateLimitedCards).not.toHaveBeenCalled();
+      expect(reconcileStuckDeploys).not.toHaveBeenCalled();
     } finally {
       await fastify.close();
     }
@@ -75,7 +80,7 @@ describe("orchestratorPlugin", () => {
     }
   });
 
-  it("starts the orchestrator and runs both reconcile sweeps only when ORCHESTRATOR_ENABLED=1 is explicitly set (the real instance)", async () => {
+  it("starts the orchestrator and runs all three reconcile sweeps only when ORCHESTRATOR_ENABLED=1 is explicitly set (the real instance)", async () => {
     process.env.ORCHESTRATOR_ENABLED = "1";
     const stop = vi.fn().mockResolvedValue(undefined);
     startOrchestrator.mockResolvedValue({ coordination: {}, hooks: {}, stop });
@@ -85,6 +90,7 @@ describe("orchestratorPlugin", () => {
       expect(startOrchestrator).toHaveBeenCalledTimes(1);
       expect(reconcileOrphanedRuns).toHaveBeenCalledTimes(1);
       expect(reconcileRateLimitedCards).toHaveBeenCalledTimes(1);
+      expect(reconcileStuckDeploys).toHaveBeenCalledTimes(1);
       expect((fastify as unknown as { orchestrator?: unknown }).orchestrator).toBeDefined();
     } finally {
       await fastify.close();

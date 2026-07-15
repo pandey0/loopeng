@@ -1,6 +1,12 @@
 import fp from "fastify-plugin";
 import type { FastifyPluginAsync } from "fastify";
-import { reconcileOrphanedRuns, reconcileRateLimitedCards, startOrchestrator, type Orchestrator } from "@loopeng/orchestrator";
+import {
+  reconcileOrphanedRuns,
+  reconcileRateLimitedCards,
+  reconcileStuckDeploys,
+  startOrchestrator,
+  type Orchestrator,
+} from "@loopeng/orchestrator";
 
 declare module "fastify" {
   interface FastifyInstance {
@@ -59,6 +65,15 @@ export const orchestratorPlugin: FastifyPluginAsync = fp(async (fastify) => {
   const requeued = await reconcileRateLimitedCards();
   if (requeued > 0) {
     fastify.log.warn(`requeued ${requeued} card(s) stranded by a rate-limit timer lost to a prior process restart`);
+  }
+
+  // Same reasoning as both sweeps above: a card stuck in "deploying" with
+  // no live deploy behind it (its owning process died mid-deploy) never
+  // gets a chance to self-heal on its own -- nothing re-enters "deploying"
+  // from "deploying". See reconcileStuckDeploys' own comment.
+  const deploysRecovered = await reconcileStuckDeploys();
+  if (deploysRecovered > 0) {
+    fastify.log.warn(`recovered ${deploysRecovered} card(s) stuck in "deploying" by a prior process restart -> deploy_failed`);
   }
 
   const orchestrator = await startOrchestrator();

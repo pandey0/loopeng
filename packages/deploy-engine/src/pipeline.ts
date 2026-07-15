@@ -1,5 +1,5 @@
 import { simpleGit } from "simple-git";
-import { and, eq } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 import { db } from "@loopeng/db";
 import { cards, deployRecords, gateDefinitions, gateResults } from "@loopeng/db";
 import { applyTransition } from "@loopeng/board-engine";
@@ -94,6 +94,52 @@ async function reconcileCrashedDeploys(cardId: string): Promise<void> {
       await recordDeployLiveGate(cardId, "failed", detail);
     }
   }
+}
+
+// reconcileCrashedDeploys above only runs *reactively*, at the top of a
+// fresh runDeployPipeline call for the same card -- which requires a new
+// card.moved "-> deploying" event to fire it. A card already sitting in
+// "deploying" when the process that was running its deploy dies (an api
+// restart, a crash) never gets one: nothing re-enters "deploying" from
+// "deploying" itself, so that reactive check never gets a chance to run,
+// and the card is stuck there forever with no error, no retry button, and
+// no visible reason -- worse than deploy_failed, since a human looking at
+// the board sees "deploying" and reasonably assumes something is still
+// happening. Confirmed live on 2026-07-15: a card sat in "deploying" for
+// 29+ minutes after an unrelated api restart orphaned its deploy attempt.
+//
+// Runs once at boot (see apps/api's orchestrator plugin), same shape as
+// reconcileOrphanedRuns/reconcileRateLimitedCards: sweep cards actually
+// stuck in "deploying" with no live deploy behind them, reconcile the
+// crashed deploy_records row (same finalization reconcileCrashedDeploys
+// already does), and move the card to deploy_failed so a human can retry
+// the deploy step directly -- deploy_failed -> deploying skips
+// implementer/reviewer/gates entirely, so this doesn't cost a re-run of
+// any of that, only the deploy step itself.
+export async function reconcileStuckDeploys(): Promise<number> {
+  const stuckCards = await db.select({ id: cards.id }).from(cards).where(eq(cards.state, "deploying"));
+  let recovered = 0;
+
+  for (const card of stuckCards) {
+    const [latestRecord] = await db
+      .select({ id: deployRecords.id, status: deployRecords.status })
+      .from(deployRecords)
+      .where(eq(deployRecords.cardId, card.id))
+      .orderBy(desc(deployRecords.startedAt))
+      .limit(1);
+    if (!latestRecord || latestRecord.status !== "deploying") continue;
+
+    await reconcileCrashedDeploys(card.id);
+    await applyTransition({
+      cardId: card.id,
+      toState: "deploy_failed",
+      actorType: "automation",
+      reason: "deploy attempt was orphaned by a process restart -- recovered at boot, retry the deploy step whenever ready",
+    });
+    recovered++;
+  }
+
+  return recovered;
 }
 
 // Runs once a card reaches "deploying" (auto for low/med risk, or after
