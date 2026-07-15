@@ -41,6 +41,30 @@ async function probeHealth(healthUrl: string, fetchImpl: typeof fetch): Promise<
   }
 }
 
+// Writes the restart-request marker file only -- does not wait for or
+// verify the restart. Exists because restartNativeApi below is structurally
+// unable to succeed when called from inside the very process it's asking to
+// be restarted (see its own comment): the deploy pipeline runs *in* the
+// native api process, so calling restartNativeApi from there means the
+// caller is always the process about to be killed. native-api-supervisor's
+// restartChild() terminates the old child before spawning the new one --
+// there is no window in which the dying process could ever observe a new
+// bootId, since the new process doesn't exist yet when the old one is
+// killed. Confirmed live on 2026-07-15: every deploy that reached this step
+// silently never resumed (no error, no timeout log -- the awaiting code
+// simply stopped executing along with the rest of the process), leaving
+// deploy_records/the card stuck in "deploying" forever. Callers that need
+// the restart to happen but can't personally witness it (docker-compose.ts)
+// should use this instead, and let the boot-time supervisor mechanism (now
+// covered by its own tests, see native-api-supervisor.test.ts) be the thing
+// that's trusted to actually carry it out.
+export async function requestNativeApiRestart(requestFile: string = DEFAULT_NATIVE_API_REQUEST_FILE): Promise<{ requestId: string }> {
+  const requestId = randomUUID();
+  await mkdir(path.dirname(requestFile), { recursive: true });
+  await writeFile(requestFile, JSON.stringify({ requestId, requestedAt: new Date().toISOString() }));
+  return { requestId };
+}
+
 // Requests a restart of the native api process via the file-based marker
 // native-api-supervisor.ts watches, then polls /health until it reports a
 // *different* bootId than before the request -- proof a new process is
@@ -48,6 +72,10 @@ async function probeHealth(healthUrl: string, fetchImpl: typeof fetch): Promise<
 // A stale process passes a plain DB-connectivity health check just fine
 // (that's exactly how the 3-day-stale-api incident went unnoticed), so
 // "healthy" alone is never sufficient here.
+//
+// Only safe to call from a process *other than* the one being restarted --
+// see requestNativeApiRestart's comment above for why calling this from
+// inside the native api process itself can never observe success.
 export async function restartNativeApi(opts: NativeApiRestartOptions): Promise<NativeApiRestartResult> {
   const requestFile = opts.requestFile ?? DEFAULT_NATIVE_API_REQUEST_FILE;
   const timeoutMs = opts.timeoutMs ?? 60_000;
