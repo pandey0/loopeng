@@ -66,16 +66,19 @@ function PlanPageInner() {
   const [images, setImages] = useState<PendingImage[]>([]);
   const [imageError, setImageError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const imagesRef = useRef<PendingImage[]>(images);
+  imagesRef.current = images;
 
   const selectedId = searchParams.get("session");
 
   // Revoke every remaining object URL on unmount -- individual removes
   // revoke their own, this only catches whatever's left when navigating away.
+  // imagesRef (kept current every render) avoids the stale closure a plain
+  // `[]`-dep effect would capture over `images` from the initial render.
   useEffect(() => {
     return () => {
-      for (const img of images) URL.revokeObjectURL(img.previewUrl);
+      for (const img of imagesRef.current) URL.revokeObjectURL(img.previewUrl);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   function addFiles(files: FileList | File[]) {
