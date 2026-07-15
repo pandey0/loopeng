@@ -2,22 +2,16 @@ import { EventEmitter } from "node:events";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from "vitest";
 import { NativeApiSupervisor, type SpawnFn } from "./native-api-supervisor.js";
 
 class FakeChild extends EventEmitter {
   pid: number;
   exitCode: number | null = null;
-  killCalls: string[] = [];
 
   constructor(pid: number) {
     super();
     this.pid = pid;
-  }
-
-  kill(signal: string) {
-    this.killCalls.push(signal);
-    return true;
   }
 
   simulateExit(code: number | null, signal: string | null) {
@@ -34,8 +28,16 @@ describe("NativeApiSupervisor", () => {
   let spawnFn: SpawnFn;
   let nextPid: number;
   let supervisor: NativeApiSupervisor;
+  let killSpy: MockInstance<typeof process.kill>;
 
   beforeEach(async () => {
+    // terminate()/stop() signal the real process group via process.kill
+    // (killProcessGroup, @loopeng/agents) -- the fake pids here (1000, 1001,
+    // ...) don't correspond to a real process group, so without this mock
+    // every test (including afterEach's supervisor.stop()) would issue a
+    // real syscall that's essentially guaranteed to ESRCH. Mocked globally
+    // so no test needs to remember to do this itself.
+    killSpy = vi.spyOn(process, "kill").mockImplementation(() => true);
     tmpDir = await mkdtemp(path.join(os.tmpdir(), "native-api-supervisor-test-"));
     requestFile = path.join(tmpDir, "restart-request.json");
     pidFile = path.join(tmpDir, "native-api.pid");
@@ -62,6 +64,7 @@ describe("NativeApiSupervisor", () => {
   afterEach(async () => {
     await supervisor.stop();
     await rm(tmpDir, { recursive: true, force: true });
+    killSpy.mockRestore();
   });
 
   it("spawns exactly one child on start", async () => {
@@ -69,7 +72,12 @@ describe("NativeApiSupervisor", () => {
     expect(spawned.length).toBe(1);
   });
 
-  it("SIGTERMs the old child and spawns a new one when a restart is requested", async () => {
+  it("SIGTERMs the old child's whole process group and spawns a new one when a restart is requested", async () => {
+    // terminate() signals the process *group* (process.kill(-pid, ...)),
+    // not child.kill() directly -- see native-api-supervisor.ts's comment on
+    // why: this.command is a multi-layer wrapper chain (pnpm -> sh -> tsx ->
+    // node), and only a group-wide signal reliably reaches the real
+    // grandchild process actually holding the port.
     await supervisor.start();
     expect(spawned.length).toBe(1);
     const first = spawned[0]!;
@@ -79,7 +87,7 @@ describe("NativeApiSupervisor", () => {
     // Give the poll loop a few ticks to pick up the new requestId and call
     // terminate(), which is what actually sends SIGTERM.
     await new Promise((resolve) => setTimeout(resolve, 30));
-    expect(first.killCalls).toContain("SIGTERM");
+    expect(killSpy).toHaveBeenCalledWith(-first.pid, "SIGTERM");
 
     // terminate() awaits the child's own "exit" event before spawning the
     // replacement -- simulate the old process actually shutting down.

@@ -1,9 +1,14 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { readFile, mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { killProcessGroup } from "@loopeng/agents";
 import { DEFAULT_NATIVE_API_REQUEST_FILE } from "./native-api.js";
 
-export type SpawnFn = (command: string, args: string[], options: { cwd: string; env: NodeJS.ProcessEnv; stdio: "inherit" }) => ChildProcess;
+export type SpawnFn = (
+  command: string,
+  args: string[],
+  options: { cwd: string; env: NodeJS.ProcessEnv; stdio: "inherit"; detached: true },
+) => ChildProcess;
 
 export interface NativeApiSupervisorOptions {
   repoRoot: string;
@@ -77,7 +82,7 @@ export class NativeApiSupervisor {
   async stop(): Promise<void> {
     this.stopped = true;
     if (this.pollTimer) clearInterval(this.pollTimer);
-    if (this.child) this.child.kill("SIGTERM");
+    if (this.child?.pid) killProcessGroup(this.child.pid, "SIGTERM");
   }
 
   private async readRequestId(): Promise<string | null> {
@@ -101,7 +106,18 @@ export class NativeApiSupervisor {
   }
 
   private spawnChild(): void {
-    const child = this.spawnFn(this.command, this.args, { cwd: this.repoRoot, env: this.env, stdio: "inherit" });
+    // detached: true makes this child the leader of its own OS process
+    // group -- see killProcessGroup's own module comment (@loopeng/agents)
+    // for why this matters: this.command is "pnpm --filter @loopeng/api run
+    // start" (or similar), a wrapper chain (pnpm -> sh -> tsx -> node)
+    // several processes deep. Signaling just the immediate pnpm process left
+    // the real api process -- the one actually holding port 4000, several
+    // levels down -- alive and un-terminated. terminate() below then
+    // spawned a fresh child that immediately hit EADDRINUSE against the
+    // still-alive old one, crash-looped forever via the exit handler below,
+    // and no deploy's restart step could ever succeed. Confirmed live on
+    // 2026-07-15.
+    const child = this.spawnFn(this.command, this.args, { cwd: this.repoRoot, env: this.env, stdio: "inherit", detached: true });
     this.child = child;
     if (child.pid) {
       writeFile(this.pidFile, String(child.pid)).catch((err) => this.log(`failed to write pidfile: ${(err as Error).message}`));
@@ -133,14 +149,19 @@ export class NativeApiSupervisor {
 
   private terminate(child: ChildProcess): Promise<void> {
     return new Promise((resolve) => {
+      if (!child.pid) {
+        resolve();
+        return;
+      }
+      const pid = child.pid;
       const timer = setTimeout(() => {
-        child.kill("SIGKILL");
+        killProcessGroup(pid, "SIGKILL");
       }, this.gracefulTimeoutMs);
       child.once("exit", () => {
         clearTimeout(timer);
         resolve();
       });
-      child.kill("SIGTERM");
+      killProcessGroup(pid, "SIGTERM");
     });
   }
 }
