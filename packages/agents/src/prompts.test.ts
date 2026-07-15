@@ -201,6 +201,20 @@ describe("buildPlannerPrompt", () => {
     expect(prompt).toContain("(no linked spec docs found)");
     expect(prompt).toContain("(no relevant skill docs found)");
   });
+
+  it("instructs code grounding for bug cards using Read/Grep/Glob, best-effort", () => {
+    const prompt = buildPlannerPrompt("The search box misaligns on mobile");
+    expect(prompt).toContain("## Code grounding for bug cards");
+    expect(prompt).toContain("Read/Grep/Glob");
+    expect(prompt).toContain('cardType "bug"');
+    expect(prompt).toContain("don't block on it");
+    expect(prompt).toContain("feature/chore/spike cards; they stay prose-only");
+  });
+
+  it("no longer claims the planner has zero file tools", () => {
+    const prompt = buildPlannerPrompt("Add SSO login");
+    expect(prompt).not.toContain("do not have file or shell tools");
+  });
 });
 
 describe("buildManagerPrompt", () => {
