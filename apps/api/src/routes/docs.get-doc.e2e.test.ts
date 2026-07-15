@@ -60,7 +60,7 @@ describe("get_doc MCP tool (real end-to-end, over the /docs API)", () => {
       cwd: process.cwd(),
       depth: 1,
       disallowedTools: ["Edit", "Write", "NotebookEdit", "Bash"],
-      cardApiKey: "lk_unused-get-doc-is-unauthenticated",
+      cardApiKey: "lk_unused",
       cardApiUrl: url,
     });
 
