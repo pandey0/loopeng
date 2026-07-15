@@ -62,13 +62,23 @@ describe("reconcileStuckDeploys", () => {
     expect(recordAfter?.finishedAt).not.toBeNull();
   });
 
-  it("leaves a card alone if it's 'deploying' but has no deploy_records row at all (mid-flight, not yet inserted)", async () => {
-    const cardId = await makeCard("genuinely mid-deploy", "deploying");
+  it("recovers a card stuck in 'deploying' even with no deploy_records row at all -- a real attempt can die before that insert", async () => {
+    // Regression: the first version of this sweep only acted when a
+    // deploy_records row also said "deploying", on the assumption that no
+    // row meant "genuinely mid-flight, not yet inserted." That's wrong at
+    // boot -- runDeployPipeline runs entirely in-process, so if this
+    // process just booted, nothing from a previous process's attempt can
+    // possibly still be running, whether or not it got as far as writing a
+    // deploy_records row. Confirmed live: a card died during worktree/repo
+    // resolution or lock acquisition, before ever reaching that insert, and
+    // sat in "deploying" for 8+ minutes with zero deploy_records rows.
+    const cardId = await makeCard("died before any deploy_records row existed", "deploying");
 
-    await reconcileStuckDeploys();
+    const recovered = await reconcileStuckDeploys();
+    expect(recovered).toBeGreaterThanOrEqual(1);
 
     const [cardAfter] = await db.select().from(cards).where(eq(cards.id, cardId));
-    expect(cardAfter?.state).toBe("deploying");
+    expect(cardAfter?.state).toBe("deploy_failed");
   });
 
   it("ignores cards not in the 'deploying' state", async () => {

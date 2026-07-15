@@ -109,26 +109,25 @@ async function reconcileCrashedDeploys(cardId: string): Promise<void> {
 // 29+ minutes after an unrelated api restart orphaned its deploy attempt.
 //
 // Runs once at boot (see apps/api's orchestrator plugin), same shape as
-// reconcileOrphanedRuns/reconcileRateLimitedCards: sweep cards actually
-// stuck in "deploying" with no live deploy behind them, reconcile the
-// crashed deploy_records row (same finalization reconcileCrashedDeploys
-// already does), and move the card to deploy_failed so a human can retry
-// the deploy step directly -- deploy_failed -> deploying skips
+// reconcileOrphanedRuns/reconcileRateLimitedCards: at boot, ANY card still
+// in "deploying" is provably orphaned, full stop -- runDeployPipeline runs
+// entirely in-process (no separate persistent worker), so nothing about a
+// live deploy can survive this process restarting. This isn't limited to
+// cards whose deploy_records row also says "deploying": a first real
+// attempt can die even earlier than that insert (worktree/repo resolution,
+// acquiring the deploy lock), leaving no deploy_records row at all --
+// confirmed live on 2026-07-15, a card stuck in "deploying" for 8+ minutes
+// with zero deploy_records rows for that attempt. reconcileCrashedDeploys
+// is still called to finalize whatever *does* exist (a crash leftover row,
+// if one was written); it safely no-ops if there's nothing to reconcile.
+// Either way the card moves to deploy_failed so a human can retry the
+// deploy step directly -- deploy_failed -> deploying skips
 // implementer/reviewer/gates entirely, so this doesn't cost a re-run of
 // any of that, only the deploy step itself.
 export async function reconcileStuckDeploys(): Promise<number> {
   const stuckCards = await db.select({ id: cards.id }).from(cards).where(eq(cards.state, "deploying"));
-  let recovered = 0;
 
   for (const card of stuckCards) {
-    const [latestRecord] = await db
-      .select({ id: deployRecords.id, status: deployRecords.status })
-      .from(deployRecords)
-      .where(eq(deployRecords.cardId, card.id))
-      .orderBy(desc(deployRecords.startedAt))
-      .limit(1);
-    if (!latestRecord || latestRecord.status !== "deploying") continue;
-
     await reconcileCrashedDeploys(card.id);
     await applyTransition({
       cardId: card.id,
@@ -136,10 +135,9 @@ export async function reconcileStuckDeploys(): Promise<number> {
       actorType: "automation",
       reason: "deploy attempt was orphaned by a process restart -- recovered at boot, retry the deploy step whenever ready",
     });
-    recovered++;
   }
 
-  return recovered;
+  return stuckCards.length;
 }
 
 // Runs once a card reaches "deploying" (auto for low/med risk, or after
