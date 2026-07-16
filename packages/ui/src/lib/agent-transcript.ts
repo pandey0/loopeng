@@ -19,6 +19,7 @@ interface ContentBlock {
 export type ChatItem =
   | { kind: "assistant_text"; text: string }
   | { kind: "human_text"; text: string }
+  | { kind: "task_given"; text: string }
   | { kind: "tool_use"; name: string; input: unknown }
   | { kind: "tool_result"; content: unknown; isError: boolean }
   | { kind: "status"; text: string; isError: boolean };
@@ -49,12 +50,15 @@ export function toChatItems(event: TranscriptEvent): ChatItem[] {
   if (event.type === "user") {
     const items: ChatItem[] = [];
     // actor_type === "human" marks a turn relayed from a person over the
-    // WebSocket (card C decorates it); undecorated user events are the
-    // CLI's own tool-result turns.
+    // WebSocket (card C decorates it); actor_type === "system" marks the
+    // initial prompt handed to the agent (task instructions, card context,
+    // and -- on a retry -- the previous attempt's distilled failure note);
+    // undecorated user events are the CLI's own tool-result turns.
     const isHuman = event.actor_type === "human";
+    const isSystemTask = event.actor_type === "system";
     for (const block of contentBlocks(event)) {
       if (block.type === "text" && block.text?.trim()) {
-        items.push({ kind: isHuman ? "human_text" : "assistant_text", text: block.text });
+        items.push({ kind: isSystemTask ? "task_given" : isHuman ? "human_text" : "assistant_text", text: block.text });
       } else if (block.type === "tool_result") {
         items.push({ kind: "tool_result", content: block.content, isError: Boolean(block.is_error) });
       }

@@ -82,6 +82,19 @@ describe("runClaudeCliStreaming", () => {
       expect(Array.isArray(transcript)).toBe(true);
       expect(transcript.length).toBeGreaterThanOrEqual(events.length);
       expect(transcript.filter((event) => event.type === "result").length).toBeGreaterThanOrEqual(2);
+
+      // Regression: the initial prompt used to be written to the child's
+      // stdin only, bypassing emit() -- never captured in the persisted
+      // transcript, so a retry's injected failure-note context was
+      // invisible to anyone replaying/watching the run. It's emitted
+      // synchronously inside runClaudeCliStreaming, before this test's own
+      // session.onEvent subscription exists, so it won't be in the live
+      // `events` array above -- but it must still be in the persisted
+      // transcript, which is what a viewer's replay-on-connect actually reads.
+      const taskEvent = transcript.find((event) => event.type === "user" && event.actor_type === "system");
+      expect(taskEvent, "expected the initial prompt to be captured in the persisted transcript").toBeDefined();
+      const taskMessage = taskEvent?.message as { content?: { type: string; text?: string }[] } | undefined;
+      expect(taskMessage?.content?.[0]?.text).toContain("PONG");
     } finally {
       session.close();
       await db.delete(agentRuns).where(eq(agentRuns.id, agentRunId));

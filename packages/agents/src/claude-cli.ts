@@ -286,6 +286,18 @@ export function runClaudeCliStreaming(input: RunClaudeCliStreamingInput): Stream
   });
 
   child.stdin.write(formatUserTurn(input.prompt) + "\n");
+  // The initial prompt (implementer/reviewer/designer instructions, card
+  // context, and -- on a retry -- the distilled "Previous attempt feedback"
+  // section, see distillFailureNote in failure-note.ts) used to be written
+  // to the child's stdin only, bypassing emit() entirely: never pushed onto
+  // the in-memory transcript, never persisted to agent_runs.transcript,
+  // never broadcast to a live WebSocket viewer. Not filtered out -- simply
+  // never captured, so a retry's failure context (the whole reason
+  // priorFailureNote exists) was invisible in the UI even though it was
+  // genuinely being sent to the agent. actor_type "system" (distinct from
+  // sendInput's "human") marks this as the task handed to the agent, not a
+  // person typing -- see toChatItems for how it renders.
+  emit({ type: "user", actor_type: "system", message: { role: "user", content: [{ type: "text", text: input.prompt }] } });
 
   const session: StreamingSession = {
     agentRunId: input.agentRunId,

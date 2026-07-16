@@ -153,6 +153,23 @@ export function AgentSessionPanel({ agentRunId, roleName, live, heightClassName 
                   {item.text}
                 </div>
               );
+            case "task_given": {
+              // Collapsed by default -- the full prompt (card context, doc
+              // summaries, and on a retry the previous attempt's distilled
+              // failure note) can run to thousands of characters, mostly
+              // boilerplate a viewer doesn't need every time. The label
+              // flags a retry specifically since that's the case someone's
+              // actually looking for: "why didn't the agent see what went
+              // wrong last time" now has an answer right here.
+              const isRetryWithFeedback = item.text.includes("## Previous attempt feedback");
+              return (
+                <CollapsibleEvent
+                  key={index}
+                  summary={isRetryWithFeedback ? "📋 Task given to agent (retry, with previous-attempt feedback)" : "📋 Task given to agent"}
+                  payload={item.text}
+                />
+              );
+            }
             case "tool_use":
               return plainEnglish ? (
                 <div key={index} className="text-xs text-muted-foreground">

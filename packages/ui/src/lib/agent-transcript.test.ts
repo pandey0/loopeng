@@ -40,6 +40,15 @@ describe("toChatItems", () => {
     expect(items).toEqual([{ kind: "human_text", text: "steer left" }]);
   });
 
+  it("renders the initial system-authored task prompt as a task_given item, not a plain assistant bubble", () => {
+    const items = toChatItems({
+      type: "user",
+      actor_type: "system",
+      message: { role: "user", content: [{ type: "text", text: "Implement card X.\n\n## Previous attempt feedback\nfoo" }] },
+    });
+    expect(items).toEqual([{ kind: "task_given", text: "Implement card X.\n\n## Previous attempt feedback\nfoo" }]);
+  });
+
   it("renders tool_result blocks from undecorated user events, carrying is_error through", () => {
     const items = toChatItems({
       type: "user",
