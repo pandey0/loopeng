@@ -1,15 +1,37 @@
 "use client";
 
-import { Suspense, useState } from "react";
+import { Suspense, useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Badge, Button, cn, Textarea } from "@loopeng/ui";
+import { ALLOWED_INTAKE_IMAGE_MIME_TYPES, type IntakeImage } from "@loopeng/shared";
 import { api, ApiError } from "../../lib/api";
+import { validateIntakeImageFile } from "../../lib/intakeImages";
 import { AgentSessionPanel } from "../card/[cardId]/AgentSessionPanel";
 import { useBoard } from "../providers/BoardProvider";
 
 const SESSION_LIST_POLL_MS = 4000;
 const STATUS_POLL_MS = 2000;
+
+interface PendingImage {
+  id: string;
+  file: File;
+  previewUrl: string;
+}
+
+// Strips the `data:<mime>;base64,` prefix FileReader.readAsDataURL produces
+// -- IntakeImageSchema's `data` field is raw base64 only.
+function readAsBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = reader.result as string;
+      resolve(result.slice(result.indexOf(",") + 1));
+    };
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(file);
+  });
+}
 
 function statusMeta(status: string): { label: string; tone: string } {
   switch (status) {
@@ -41,8 +63,46 @@ function PlanPageInner() {
   const [requestText, setRequestText] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
+  const [images, setImages] = useState<PendingImage[]>([]);
+  const [imageError, setImageError] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const imagesRef = useRef<PendingImage[]>(images);
+  imagesRef.current = images;
 
   const selectedId = searchParams.get("session");
+
+  // Revoke every remaining object URL on unmount -- individual removes
+  // revoke their own, this only catches whatever's left when navigating away.
+  // imagesRef (kept current every render) avoids the stale closure a plain
+  // `[]`-dep effect would capture over `images` from the initial render.
+  useEffect(() => {
+    return () => {
+      for (const img of imagesRef.current) URL.revokeObjectURL(img.previewUrl);
+    };
+  }, []);
+
+  function addFiles(files: FileList | File[]) {
+    const accepted: PendingImage[] = [];
+    const rejected: string[] = [];
+    for (const file of Array.from(files)) {
+      const result = validateIntakeImageFile(file);
+      if (!result.ok) {
+        rejected.push(result.reason);
+        continue;
+      }
+      accepted.push({ id: `${file.name}-${file.lastModified}-${Math.random()}`, file, previewUrl: URL.createObjectURL(file) });
+    }
+    if (accepted.length > 0) setImages((prev) => [...prev, ...accepted]);
+    setImageError(rejected.length > 0 ? rejected.join("; ") : null);
+  }
+
+  function removeImage(id: string) {
+    setImages((prev) => {
+      const removed = prev.find((img) => img.id === id);
+      if (removed) URL.revokeObjectURL(removed.previewUrl);
+      return prev.filter((img) => img.id !== id);
+    });
+  }
 
   const sessionsQuery = useQuery({
     queryKey: ["intake-sessions", boardId],
@@ -81,8 +141,18 @@ function PlanPageInner() {
     setSubmitting(true);
     setSubmitError(null);
     try {
-      const { agentRunId } = await api.intake(boardId, requestText.trim());
+      const payloadImages: IntakeImage[] = await Promise.all(
+        images.map(async (img) => ({
+          mimeType: img.file.type as IntakeImage["mimeType"],
+          sizeBytes: img.file.size,
+          data: await readAsBase64(img.file),
+        })),
+      );
+      const { agentRunId } = await api.intake(boardId, requestText.trim(), payloadImages);
       setRequestText("");
+      for (const img of images) URL.revokeObjectURL(img.previewUrl);
+      setImages([]);
+      setImageError(null);
       await queryClient.invalidateQueries({ queryKey: ["intake-sessions", boardId] });
       router.push(`/plan?session=${agentRunId}`);
     } catch (err) {
@@ -107,7 +177,63 @@ function PlanPageInner() {
             placeholder="Describe what you need — the planner will ask if anything's unclear"
             className="w-full text-sm"
           />
-          {submitError && <p className="mt-2 text-xs text-destructive">{submitError}</p>}
+
+          <input
+            ref={fileInputRef}
+            type="file"
+            multiple
+            accept={ALLOWED_INTAKE_IMAGE_MIME_TYPES.join(",")}
+            className="hidden"
+            onChange={(e) => {
+              if (e.target.files && e.target.files.length > 0) addFiles(e.target.files);
+              e.target.value = "";
+            }}
+          />
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="mt-2 w-full"
+            onClick={() => fileInputRef.current?.click()}
+            disabled={submitting}
+          >
+            Attach images
+          </Button>
+
+          {images.length > 0 && (
+            <div className="mt-2 flex flex-wrap gap-2">
+              {images.map((img) => (
+                <div key={img.id} className="relative h-12 w-12 shrink-0">
+                  <img
+                    src={img.previewUrl}
+                    alt={img.file.name}
+                    className="h-12 w-12 rounded-md border border-border object-cover"
+                  />
+                  <button
+                    type="button"
+                    aria-label={`Remove ${img.file.name}`}
+                    onClick={() => removeImage(img.id)}
+                    disabled={submitting}
+                    className="absolute -right-1.5 -top-1.5 flex h-4 w-4 items-center justify-center rounded-full bg-background text-muted-foreground hover:text-foreground"
+                  >
+                    ×
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {imageError && (
+            <p className="mt-2 text-xs text-destructive" role="alert">
+              {imageError}
+            </p>
+          )}
+
+          {submitError && (
+            <p className="mt-2 text-xs text-destructive" role="alert">
+              {submitError}
+            </p>
+          )}
           <Button
             size="sm"
             className="mt-2 w-full"

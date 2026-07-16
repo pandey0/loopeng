@@ -1,4 +1,14 @@
-import type { Board, Card, CardDependency, CardState, CardWithStatus, Doc, GateResultStatus, Project } from "@loopeng/shared";
+import type {
+  Board,
+  Card,
+  CardDependency,
+  CardState,
+  CardWithStatus,
+  Doc,
+  GateResultStatus,
+  IntakeImage,
+  Project,
+} from "@loopeng/shared";
 
 export interface DeployAttempt {
   id: string;
@@ -205,8 +215,11 @@ export const api = {
     request<{ github: { connected: boolean; repo: string | null }; claude: { connected: boolean; version: string | null } }>(
       "/connections",
     ),
-  intake: (boardId: string, requestText: string) =>
-    request<IntakeStartResult>(`/boards/${boardId}/intake`, { method: "POST", body: JSON.stringify({ requestText }) }),
+  intake: (boardId: string, requestText: string, images: IntakeImage[] = []) =>
+    request<IntakeStartResult>(`/boards/${boardId}/intake`, {
+      method: "POST",
+      body: JSON.stringify({ requestText, images }),
+    }),
   listIntakeSessions: (boardId: string) => request<IntakeSessionSummary[]>(`/boards/${boardId}/intake`),
   getIntakeStatus: (boardId: string, agentRunId: string) =>
     request<IntakeStatus>(`/boards/${boardId}/intake/${agentRunId}`),
