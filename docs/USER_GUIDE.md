@@ -32,9 +32,9 @@ backlog -> ready -> in_progress -> in_review -> gate_checks -> awaiting_approval
 
 **Real example: "Add rate limiting to the public API"**
 
-1. **Intake.** You click "New request" on the board and type: *"Add rate limiting to the public API so a single client can't exhaust our request budget."* A planner agent picks this up immediately — you now watch it think live (no more spinner): it reads the existing API routes, drafts a spec, and decomposes the request into an epic card plus child cards (e.g. "Add token-bucket middleware," "Add per-client rate limit config," "Add 429 response + Retry-After header," "Add rate-limit metrics"). All land in `backlog`. This takes 30–90 seconds and you see the actual reasoning stream in, not a loading spinner.
+1. **Intake, as a conversation.** You click "New" (or the "Plan" 💬 link in the sidebar) and land on `/plan` — a dedicated page, not a modal, because a planning conversation can run long and shouldn't be lost by navigating away or an API restart mid-conversation. You type: *"Add rate limiting to the public API so a single client can't exhaust our request budget."* A planner agent picks this up immediately — you watch it think live in the same conversation view — reading the existing API routes, and it may ask a clarifying question before proposing anything (e.g. "per-client rate limit — keyed by API key or by IP?"). Once it has enough, it proposes a breakdown: an epic card plus child cards (e.g. "Add token-bucket middleware," "Add per-client rate limit config," "Add 429 response + Retry-After header," "Add rate-limit metrics") — shown as a **proposal**, not yet on the board.
 
-2. **Ready.** A human (you, the product owner) reviews the decomposition, adjusts priority/risk tier if needed, and drags a card to `ready`. This is the trigger — nothing runs until a card is in `ready`.
+2. **Approve, then Ready.** Nothing exists on the board until you explicitly click **"Approve → create N cards"** — that's the real human checkpoint, not a formality; the epic + child cards + spec doc are only persisted at that moment. They land in `backlog`. From there you review, adjust priority/risk tier if needed, and drag a card to `ready`. This is the trigger — nothing runs until a card is in `ready`.
 
 3. **In Progress.** The orchestrator picks it up (single-worker queue, so cards process one at a time by priority), spins up a fresh git worktree branched off `main`, and dispatches an **implementer** agent. Real example: for "Add 429 response + Retry-After header," the implementer reads the linked spec doc, writes the middleware change, adds a test hitting the rate limit and asserting a 429 with the header, runs the test suite in the worktree, and commits. You can click the pulsing dot on the card (or use the "watch" link that now appears directly on the board tile) to see this happen live — actual tool calls (`Read`, `Edit`, `Bash: pnpm test`), actual reasoning text, streaming in real time.
 
@@ -69,7 +69,7 @@ Every implementer/reviewer/planner run streams live: assistant reasoning text, e
 
 A **completed** run opens read-only (transcript playback, no input box). A **live** run lets you type a message directly into the running agent — useful for production example: an implementer is 80% through a task but heading in a direction you don't like; you type "actually, use the existing `RateLimiter` class in `packages/shared` instead of writing a new one" directly into its live session instead of waiting for it to finish and fail review.
 
-**Intake is live too now.** Submitting a new request no longer shows a bare "this can take tens of seconds" spinner — you watch the planner agent's actual decomposition reasoning stream in, the same chat-style view, ending in the same "created N cards" success screen.
+**Planning (`/plan`) is live too.** Submitting a new request doesn't show a bare spinner — you watch the planner agent's actual reasoning (and any clarifying questions it asks) stream in, the same chat-style view, ending in a proposal you explicitly approve before anything lands on the board.
 
 ## 6. Card Questions: when an agent needs a real human call
 

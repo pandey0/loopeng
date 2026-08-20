@@ -232,6 +232,19 @@ export const cardRoutes: FastifyPluginAsync = async (fastify) => {
   // gate_checks without waiting for a schedule.
   fastify.post("/cards/:id/dispatch", { preHandler: [fastify.requireActor, fastify.requireOwnCard] }, async (request, reply) => {
     const { id } = request.params as { id: string };
+    // fastify.orchestrator is only decorated when ORCHESTRATOR_ENABLED=1
+    // (apps/api/src/plugins/orchestrator.ts) -- the default for every
+    // worktree-local/dev api process, by design. Without this check, calling
+    // this route on any dispatch-disabled instance threw a raw "Cannot read
+    // properties of undefined (reading 'coordination')" instead of a real
+    // error -- confirmed live, not hypothetical.
+    if (!fastify.orchestrator) {
+      reply.status(503).send({
+        error: "dispatch_disabled",
+        message: "this instance has ORCHESTRATOR_ENABLED unset -- manual dispatch isn't available here",
+      });
+      return;
+    }
     await fastify.orchestrator.coordination.dispatch(id);
     reply.status(202).send({ dispatched: id });
   });

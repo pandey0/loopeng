@@ -266,198 +266,218 @@ export async function orchestrateCard(cardId: string, hooks: HookRegistry): Prom
 
   await applyTransition({ cardId, toState: "in_progress", actorType: "agent" });
 
-  // Designer role (RFC 2026-07 agent org chart): a UI/UX-touching card gets a
-  // design spec upstream of the implementer's first run, and a design review
-  // downstream alongside peer review. isUiCard is computed once here (not
-  // re-checked per attempt) since card.tags/description don't change across
-  // retries. hasDesignerSpecDoc guards against re-running the spec agent —
-  // and hitting docs.slug's unique constraint — if this card re-enters
-  // in_progress later (e.g. after a QUESTION: pause).
-  const isUiCard = await cardTouchesUi(card);
-  if (isUiCard && !(await hasDesignerSpecDoc(cardId))) {
-    await runDesignerSpecAgent(card);
-  }
-
-  // Seeded from whatever this card's last real failure was (see
-  // loadPriorFailureNote) -- covers a fresh external dispatch (a human
-  // clicking Retry, an auto-retry-after-rate-limit) the same way an
-  // in-process `continue` below already covers attempt > 1.
-  let priorFailureNote: string | undefined = await loadPriorFailureNote(cardId);
-
-  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
-    const [currentCard] = await db.select().from(cards).where(eq(cards.id, cardId));
-    if (!currentCard) throw new Error(`card disappeared mid-run: ${cardId}`);
-
-    // The first iteration always sees "in_progress" (just set above), but a
-    // retry (attempt > 1) re-reads whatever the card's state actually is
-    // right now -- if something outside this loop moved it off in_progress
-    // while the killed attempt's process was still winding down (a human
-    // stopping the run, another automation blocking the card), respect that
-    // instead of blindly spawning another implementer attempt against a
-    // card that already moved on. Without this, killing an agent run's
-    // process didn't actually stop the card: the loop would just retry.
-    if (currentCard.state !== "in_progress") {
-      return { status: "blocked", reason: `stopped: card is now "${currentCard.state}", not retrying` };
+  // Everything from here through the end of the attempt loop used to have no
+  // top-level safety net -- only the implementer/reviewer/gate steps' own
+  // *soft* failures (isError, verdict: "fail", !allPassed) were handled; a
+  // genuine thrown exception anywhere in this range (a designer-agent crash,
+  // a DB hiccup in loadPriorFailureNote, anything) propagated straight out
+  // to the event-trigger's bare `.catch(console.error)`, leaving the card
+  // stuck at whatever state it was last transitioned to -- with zero
+  // agent_runs rows for that attempt, so reconcileOrphanedRuns (which only
+  // catches runs that got as far as existing) can't see it either. Recorded
+  // live: card 2e794f36 stuck at "in_progress" this way after a redispatch
+  // crashed before runImplementerAgent could even insert its row. Same
+  // pattern as createWorktree's try/catch above, just covering the rest of
+  // the function instead of only worktree setup.
+  try {
+    // Designer role (RFC 2026-07 agent org chart): a UI/UX-touching card gets a
+    // design spec upstream of the implementer's first run, and a design review
+    // downstream alongside peer review. isUiCard is computed once here (not
+    // re-checked per attempt) since card.tags/description don't change across
+    // retries. hasDesignerSpecDoc guards against re-running the spec agent —
+    // and hitting docs.slug's unique constraint — if this card re-enters
+    // in_progress later (e.g. after a QUESTION: pause).
+    const isUiCard = await cardTouchesUi(card);
+    if (isUiCard && !(await hasDesignerSpecDoc(cardId))) {
+      await runDesignerSpecAgent(card);
     }
 
-    const implResult = await runImplementerAgent(currentCard, priorFailureNote);
+    // Seeded from whatever this card's last real failure was (see
+    // loadPriorFailureNote) -- covers a fresh external dispatch (a human
+    // clicking Retry, an auto-retry-after-rate-limit) the same way an
+    // in-process `continue` below already covers attempt > 1.
+    let priorFailureNote: string | undefined = await loadPriorFailureNote(cardId);
 
-    // A QUESTION: escalation ends the turn deliberately — it is neither a
-    // success nor a failure, so it must not consume one of the MAX_ATTEMPTS
-    // retries: the card pauses blocked until a human answers, then resumes
-    // to "ready" (event-trigger redispatches it) rather than retrying here.
-    if (implResult.question) {
-      const truncatedReason = implResult.question.slice(0, QUESTION_REASON_TRUNCATE_LENGTH);
-      const routedTo = await resolveQuestionRouting(cardId);
-      await db.insert(cardQuestions).values({
-        cardId,
-        agentRunId: implResult.agentRunId,
-        roleName: "implementer",
-        question: implResult.question,
-        status: "open",
-        routedTo,
+    for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+      const [currentCard] = await db.select().from(cards).where(eq(cards.id, cardId));
+      if (!currentCard) throw new Error(`card disappeared mid-run: ${cardId}`);
+
+      // The first iteration always sees "in_progress" (just set above), but a
+      // retry (attempt > 1) re-reads whatever the card's state actually is
+      // right now -- if something outside this loop moved it off in_progress
+      // while the killed attempt's process was still winding down (a human
+      // stopping the run, another automation blocking the card), respect that
+      // instead of blindly spawning another implementer attempt against a
+      // card that already moved on. Without this, killing an agent run's
+      // process didn't actually stop the card: the loop would just retry.
+      if (currentCard.state !== "in_progress") {
+        return { status: "blocked", reason: `stopped: card is now "${currentCard.state}", not retrying` };
+      }
+
+      const implResult = await runImplementerAgent(currentCard, priorFailureNote);
+
+      // A QUESTION: escalation ends the turn deliberately — it is neither a
+      // success nor a failure, so it must not consume one of the MAX_ATTEMPTS
+      // retries: the card pauses blocked until a human answers, then resumes
+      // to "ready" (event-trigger redispatches it) rather than retrying here.
+      if (implResult.question) {
+        const truncatedReason = implResult.question.slice(0, QUESTION_REASON_TRUNCATE_LENGTH);
+        const routedTo = await resolveQuestionRouting(cardId);
+        await db.insert(cardQuestions).values({
+          cardId,
+          agentRunId: implResult.agentRunId,
+          roleName: "implementer",
+          question: implResult.question,
+          status: "open",
+          routedTo,
+        });
+        // Notification framing depends on who it's routed to (spec:
+        // org-chart-manager-agent-role) — a manager-reviewed epic's cards get
+        // a manager-drafted framing instead of the raw agent question, since
+        // the manager (not the product owner) is the first line of triage.
+        await db.insert(eventLog).values({
+          entityType: "card",
+          entityId: cardId,
+          eventType: "card.question_raised",
+          actorType: "agent",
+          payload: {
+            routedTo,
+            message: routedTo === "tech-manager" ? `Manager review needed: ${implResult.question}` : implResult.question,
+          },
+        });
+        await applyTransition({ cardId, toState: "blocked", actorType: "agent", reason: `waiting on answer: ${truncatedReason}` });
+        return { status: "blocked", reason: `waiting on answer: ${truncatedReason}` };
+      }
+
+      if (implResult.isError) {
+        if (isRateLimitError(implResult.resultText)) {
+          await blockForRateLimit(cardId, implResult.resultText);
+          return { status: "blocked", reason: "rate_limited" };
+        }
+        if (attempt < MAX_ATTEMPTS) {
+          priorFailureNote = distillFailureNote("implementer_error", implResult.resultText);
+          continue; // retry in the same worktree, still in_progress
+        }
+        const failReason = `implementer failed after ${MAX_ATTEMPTS} attempts: ${implResult.resultText.slice(0, 300)}`;
+        await applyTransition({ cardId, toState: "blocked", actorType: "agent", reason: failReason });
+        await hooks.fire("onFailure", { cardId, reason: "implementer_failed", attempt });
+        return { status: "blocked", reason: "implementer_failed" };
+      }
+
+      await applyTransition({ cardId, toState: "in_review", actorType: "agent" });
+      await hooks.fire("beforeSubAgentVerify", { cardId });
+
+      const reviewResult = await runReviewerAgent(currentCard);
+      await recordPeerReviewGate(cardId, reviewResult.verdict === "pass", reviewResult.agentRunId, {
+        resultText: reviewResult.resultText.slice(0, 4000),
+        attempt,
       });
-      // Notification framing depends on who it's routed to (spec:
-      // org-chart-manager-agent-role) — a manager-reviewed epic's cards get
-      // a manager-drafted framing instead of the raw agent question, since
-      // the manager (not the product owner) is the first line of triage.
+
+      // Design review runs alongside peer review, same diff. v1 is advisory
+      // only — its verdict is recorded as the design_review gate_results row
+      // but (unlike peer review) does not itself retry or block the card;
+      // out of scope for v1 per the designer-agent-role spec.
+      if (isUiCard) {
+        const designReviewResult = await runDesignerReviewAgent(currentCard);
+        await recordDesignReviewGate(cardId, designReviewResult.verdict === "pass", designReviewResult.agentRunId, {
+          resultText: designReviewResult.resultText.slice(0, 4000),
+          attempt,
+        });
+      }
+
+      if (reviewResult.verdict === "fail") {
+        // reviewResult.verdict is "fail" for a genuine rejection *and* for a
+        // CLI-level error (fail-closed, see runReviewerAgent) -- isError
+        // narrows to the latter, and isRateLimitError confirms which kind of
+        // error before treating it as exempt from the retry count. A real
+        // review rejection still counts normally below.
+        if (reviewResult.isError && isRateLimitError(reviewResult.resultText)) {
+          await blockForRateLimit(cardId, reviewResult.resultText);
+          return { status: "blocked", reason: "rate_limited" };
+        }
+        if (attempt < MAX_ATTEMPTS) {
+          await applyTransition({
+            cardId,
+            toState: "blocked",
+            actorType: "agent",
+            reason: `review rejected (attempt ${attempt}/${MAX_ATTEMPTS}), retrying: ${reviewResult.resultText.slice(0, 300)}`,
+          });
+          await applyTransition({ cardId, toState: "in_progress", actorType: "agent" });
+          priorFailureNote = distillFailureNote("review_rejected", reviewResult.resultText);
+          continue;
+        }
+        await applyTransition({
+          cardId,
+          toState: "blocked",
+          actorType: "agent",
+          reason: `review rejected after ${MAX_ATTEMPTS} attempts: ${reviewResult.resultText.slice(0, 300)}`,
+        });
+        await hooks.fire("onFailure", { cardId, reason: "review_rejected", attempt });
+        return { status: "blocked", reason: "review_rejected" };
+      }
+
+      await applyTransition({ cardId, toState: "gate_checks", actorType: "agent" });
+
+      const pipelineResult = await runGatePipeline(currentCard, worktree.fsPath, worktree.baseCommitSha);
+      await hooks.fire("afterGateRun", { cardId, gate: "pipeline", passed: pipelineResult.allPassed, results: pipelineResult.results });
+
+      if (!pipelineResult.allPassed) {
+        const failedGates = pipelineResult.results.filter((r) => r.blocking && r.outcome.status === "failed").map((r) => r.name);
+
+        // Regression: this used to always block for a human regardless of
+        // attempt count, with no feedback wired anywhere -- neither an
+        // in-process retry nor a later external Retry ever told the
+        // implementer which gates failed or why (see priorFailureNote's own
+        // comment). The reviewer already approved this diff; a failing gate
+        // (a broken env var, a flagged secret pattern, a missing ADR link) is
+        // exactly the kind of concrete, fixable-on-a-second-pass problem
+        // review_rejected already retries for -- there's no principled reason
+        // gate failures should be treated differently.
+        if (attempt < MAX_ATTEMPTS) {
+          await applyTransition({
+            cardId,
+            toState: "blocked",
+            actorType: "agent",
+            reason: `gate(s) failed (attempt ${attempt}/${MAX_ATTEMPTS}), retrying: ${failedGates.join(", ")}`,
+          });
+          await applyTransition({ cardId, toState: "in_progress", actorType: "agent" });
+          priorFailureNote = distillFailureNote("gates_failed", formatGateFailureText(pipelineResult.results));
+          continue;
+        }
+        await applyTransition({
+          cardId,
+          toState: "blocked",
+          actorType: "agent",
+          reason: `gate(s) failed after ${MAX_ATTEMPTS} attempts: ${failedGates.join(", ")}`,
+        });
+        await hooks.fire("onFailure", { cardId, reason: "gates_failed", results: pipelineResult.results });
+        return { status: "blocked", reason: "gates_failed" };
+      }
+
+      if (currentCard.riskTier === "high") {
+        await applyTransition({ cardId, toState: "awaiting_approval", actorType: "agent" });
+        await hooks.fire("beforeDeploy", { cardId, requiresHumanApproval: true });
+        return { status: "awaiting_approval" };
+      }
+
+      await applyTransition({ cardId, toState: "deploying", actorType: "agent" });
       await db.insert(eventLog).values({
         entityType: "card",
         entityId: cardId,
-        eventType: "card.question_raised",
-        actorType: "agent",
-        payload: {
-          routedTo,
-          message: routedTo === "tech-manager" ? `Manager review needed: ${implResult.question}` : implResult.question,
-        },
+        eventType: "card.awaiting_deploy",
+        actorType: "automation",
+        payload: { reason: "all gates passed, deploy execution not yet automated (Phase 4)" },
       });
-      await applyTransition({ cardId, toState: "blocked", actorType: "agent", reason: `waiting on answer: ${truncatedReason}` });
-      return { status: "blocked", reason: `waiting on answer: ${truncatedReason}` };
+      await hooks.fire("beforeDeploy", { cardId, requiresHumanApproval: false });
+      return { status: "deploying" };
     }
 
-    if (implResult.isError) {
-      if (isRateLimitError(implResult.resultText)) {
-        await blockForRateLimit(cardId, implResult.resultText);
-        return { status: "blocked", reason: "rate_limited" };
-      }
-      if (attempt < MAX_ATTEMPTS) {
-        priorFailureNote = distillFailureNote("implementer_error", implResult.resultText);
-        continue; // retry in the same worktree, still in_progress
-      }
-      const failReason = `implementer failed after ${MAX_ATTEMPTS} attempts: ${implResult.resultText.slice(0, 300)}`;
-      await applyTransition({ cardId, toState: "blocked", actorType: "agent", reason: failReason });
-      await hooks.fire("onFailure", { cardId, reason: "implementer_failed", attempt });
-      return { status: "blocked", reason: "implementer_failed" };
-    }
-
-    await applyTransition({ cardId, toState: "in_review", actorType: "agent" });
-    await hooks.fire("beforeSubAgentVerify", { cardId });
-
-    const reviewResult = await runReviewerAgent(currentCard);
-    await recordPeerReviewGate(cardId, reviewResult.verdict === "pass", reviewResult.agentRunId, {
-      resultText: reviewResult.resultText.slice(0, 4000),
-      attempt,
-    });
-
-    // Design review runs alongside peer review, same diff. v1 is advisory
-    // only — its verdict is recorded as the design_review gate_results row
-    // but (unlike peer review) does not itself retry or block the card;
-    // out of scope for v1 per the designer-agent-role spec.
-    if (isUiCard) {
-      const designReviewResult = await runDesignerReviewAgent(currentCard);
-      await recordDesignReviewGate(cardId, designReviewResult.verdict === "pass", designReviewResult.agentRunId, {
-        resultText: designReviewResult.resultText.slice(0, 4000),
-        attempt,
-      });
-    }
-
-    if (reviewResult.verdict === "fail") {
-      // reviewResult.verdict is "fail" for a genuine rejection *and* for a
-      // CLI-level error (fail-closed, see runReviewerAgent) -- isError
-      // narrows to the latter, and isRateLimitError confirms which kind of
-      // error before treating it as exempt from the retry count. A real
-      // review rejection still counts normally below.
-      if (reviewResult.isError && isRateLimitError(reviewResult.resultText)) {
-        await blockForRateLimit(cardId, reviewResult.resultText);
-        return { status: "blocked", reason: "rate_limited" };
-      }
-      if (attempt < MAX_ATTEMPTS) {
-        await applyTransition({
-          cardId,
-          toState: "blocked",
-          actorType: "agent",
-          reason: `review rejected (attempt ${attempt}/${MAX_ATTEMPTS}), retrying: ${reviewResult.resultText.slice(0, 300)}`,
-        });
-        await applyTransition({ cardId, toState: "in_progress", actorType: "agent" });
-        priorFailureNote = distillFailureNote("review_rejected", reviewResult.resultText);
-        continue;
-      }
-      await applyTransition({
-        cardId,
-        toState: "blocked",
-        actorType: "agent",
-        reason: `review rejected after ${MAX_ATTEMPTS} attempts: ${reviewResult.resultText.slice(0, 300)}`,
-      });
-      await hooks.fire("onFailure", { cardId, reason: "review_rejected", attempt });
-      return { status: "blocked", reason: "review_rejected" };
-    }
-
-    await applyTransition({ cardId, toState: "gate_checks", actorType: "agent" });
-
-    const pipelineResult = await runGatePipeline(currentCard, worktree.fsPath, worktree.baseCommitSha);
-    await hooks.fire("afterGateRun", { cardId, gate: "pipeline", passed: pipelineResult.allPassed, results: pipelineResult.results });
-
-    if (!pipelineResult.allPassed) {
-      const failedGates = pipelineResult.results.filter((r) => r.blocking && r.outcome.status === "failed").map((r) => r.name);
-
-      // Regression: this used to always block for a human regardless of
-      // attempt count, with no feedback wired anywhere -- neither an
-      // in-process retry nor a later external Retry ever told the
-      // implementer which gates failed or why (see priorFailureNote's own
-      // comment). The reviewer already approved this diff; a failing gate
-      // (a broken env var, a flagged secret pattern, a missing ADR link) is
-      // exactly the kind of concrete, fixable-on-a-second-pass problem
-      // review_rejected already retries for -- there's no principled reason
-      // gate failures should be treated differently.
-      if (attempt < MAX_ATTEMPTS) {
-        await applyTransition({
-          cardId,
-          toState: "blocked",
-          actorType: "agent",
-          reason: `gate(s) failed (attempt ${attempt}/${MAX_ATTEMPTS}), retrying: ${failedGates.join(", ")}`,
-        });
-        await applyTransition({ cardId, toState: "in_progress", actorType: "agent" });
-        priorFailureNote = distillFailureNote("gates_failed", formatGateFailureText(pipelineResult.results));
-        continue;
-      }
-      await applyTransition({
-        cardId,
-        toState: "blocked",
-        actorType: "agent",
-        reason: `gate(s) failed after ${MAX_ATTEMPTS} attempts: ${failedGates.join(", ")}`,
-      });
-      await hooks.fire("onFailure", { cardId, reason: "gates_failed", results: pipelineResult.results });
-      return { status: "blocked", reason: "gates_failed" };
-    }
-
-    if (currentCard.riskTier === "high") {
-      await applyTransition({ cardId, toState: "awaiting_approval", actorType: "agent" });
-      await hooks.fire("beforeDeploy", { cardId, requiresHumanApproval: true });
-      return { status: "awaiting_approval" };
-    }
-
-    await applyTransition({ cardId, toState: "deploying", actorType: "agent" });
-    await db.insert(eventLog).values({
-      entityType: "card",
-      entityId: cardId,
-      eventType: "card.awaiting_deploy",
-      actorType: "automation",
-      payload: { reason: "all gates passed, deploy execution not yet automated (Phase 4)" },
-    });
-    await hooks.fire("beforeDeploy", { cardId, requiresHumanApproval: false });
-    return { status: "deploying" };
+    // unreachable — loop always returns within MAX_ATTEMPTS iterations
+    throw new Error(`orchestrateCard(${cardId}) exited loop without a result`);
+  } catch (err) {
+    const reason = `orchestration crashed: ${err instanceof Error ? err.message : String(err)}`;
+    await applyTransition({ cardId, toState: "blocked", actorType: "agent", reason }).catch(() => {});
+    await hooks.fire("onFailure", { cardId, reason: "orchestration_crashed", detail: reason }).catch(() => {});
+    return { status: "blocked", reason };
   }
-
-  // unreachable — loop always returns within MAX_ATTEMPTS iterations
-  throw new Error(`orchestrateCard(${cardId}) exited loop without a result`);
 }

@@ -129,7 +129,7 @@ export interface CardDetail extends Card {
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
 
 // A single static credential shared by every browser session -- not a
-// per-user login (no such system exists yet, see ARCHITECTURE.md), but
+// per-user login (no such system exists yet, see docs/ARCHITECTURE.md), but
 // enough to give the API a real, verifiable "this request came from the web
 // UI" identity (actorType=user) that an agent worktree's environment never
 // contains (see card 438646e5: an agent could previously self-report

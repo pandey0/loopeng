@@ -10,13 +10,14 @@ Context: LoopEng is a kanban-style dev platform where AI agents (planner, implem
 
 ### Left sidebar
 - **Board** link → `/board`
+- **Plan** link (💬) → `/plan`
 - **Docs** link → `/docs`
 - **Activity** link → `/activity`
 - Active route highlighted
 
 ### Top bar
 - **Board switcher** (dropdown) — selects the one "current board" for the whole app (persisted, drives every other page's scope)
-- **"New" button** — disabled until a board is selected; opens the **Intake Modal** (see §5)
+- **"New" button** — disabled until a board is selected; navigates to `/plan` (see §5)
 - **Notification bell**
   - Unread count badge (caps at "99+")
   - Click → dropdown of up to 50 recent events, newest first; each shows timestamp + description; card-related events link to `/card/{id}`
@@ -26,8 +27,12 @@ Context: LoopEng is a kanban-style dev platform where AI agents (planner, implem
 
 ## 2. Board (`/board`) — the primary screen
 
-**Purpose:** kanban view of every card, grouped into 9 columns matching the state machine:
-`backlog → ready → in_progress → in_review → gate_checks → awaiting_approval → deploying → done`, plus `blocked` as an escape-hatch column.
+**Purpose:** kanban view of every card, grouped into 10 columns matching the state machine:
+`backlog → ready → in_progress → in_review → gate_checks → awaiting_approval → deploying → deploy_failed → blocked → done` (`apps/web/app/board/page.tsx`'s `PHASE_3_COLUMN_STATES`). `cancelled` cards get no column at all — cancelling is a terminal exit, not something the board surfaces once it happens.
+
+**Stage pipeline bar** (`StagePipelineBar.tsx`, above the columns): a compact left-to-right count-per-stage strip for the happy path (`backlog → ... → done`), plus a visually separate "escape hatch" badge showing the combined `blocked + deploy_failed` count — the two "stuck, needs recovery" states are deliberately grouped apart from the main flow instead of breaking up its story.
+
+**Title search** (top-right, next to the dependency-graph link): a text input that filters visible cards by title substring, client-side (`filterCardsByTitle`); focus it directly from anywhere on the board via a keyboard shortcut (§ below).
 
 **Per-card tile shows:** title, card type, priority, risk tier (color-coded), an "ADR" badge if it touches architecture, blocked-reason text (if blocked), and — if an agent is actively working it — a live indicator with role/status and a one-line streaming snippet of current activity.
 
@@ -37,6 +42,7 @@ Context: LoopEng is a kanban-style dev platform where AI agents (planner, implem
 - **"watch" link** on any actively-running card → opens a dialog with the live agent session (streaming transcript, see §6)
 - **"Review & Approve" button** (only on cards in `awaiting_approval`) → opens the **Approval Dialog** (§2a)
 - **"Retry" button** (only on cards in `blocked`) → transitions the card back to `ready`
+- **On a `deploy_failed` card**: the default next-step action retries just the deploy step (`deploy_failed → deploying`) rather than the full cycle — see `docs/ARCHITECTURE.md` §3 for why that's a deliberately separate lane from `blocked`.
 - **"Dependency graph →"** link (top-right) → `/board/{boardId}/graph`
 - **Activity feed sidebar** — live event stream (SSE), card-related entries link to `/card/{id}`
 - Card list polls every 4s while any card has an active run; also invalidates on every incoming activity event
@@ -83,19 +89,24 @@ Two tabs:
 
 ---
 
-## 5. Intake Modal (opened from "New" in the top bar)
+## 5. Plan (`/plan`) — conversational intake
 
-**Purpose:** turn a freeform product-owner request into a decomposed epic + child cards, via the planner agent. Three phases in one dialog:
+**Purpose:** turn a freeform product-owner request into a decomposed epic + child cards, via the planner agent — as a dedicated page, not a modal, since a planning conversation can run long and nothing about it should be lost by navigating away or an api restart mid-conversation. Every session and its status is re-derived from the database on every load (`GET /boards/:id/intake[/...]`), not held in component state.
 
-1. **Form**: textarea for the request text; Cancel / Submit buttons; errors shown inline with a Retry option
-2. **Running**: "Planner agent is decomposing this request…" + the planner's live reasoning stream (same session panel as §6); polls intake status every 2s
-3. **Result**: list of newly-created cards (title, type badge, risk badge); Close / "View on board" (navigates to `/board?highlight={ids}`, scrolls to and highlights the new cards)
+**Layout:** a 300px session list on the left, the active conversation on the right.
+
+- **Left panel**: "New request" textarea + "Start conversation" button (`POST /boards/:id/intake`, returns `202` with an `agentRunId`, then routes to `/plan?session={id}`); below it, every past/current planning session on this board (`GET /boards/:id/intake`, polled every 4s), each showing a status badge (In conversation / Awaiting approval / Approved / Failed) and start time. Clicking one selects it.
+- **Right panel**, once a session is selected (`GET /boards/:id/intake/:agentRunId`, polled every 2s while unsettled):
+  - The planner's live/replayed session via the shared **Agent Session Panel** (§6) — the planner may ask clarifying questions before proposing anything.
+  - **`awaiting_approval`**: a proposal card — spec title, the exact list of cards it would create (title, type badge, risk badge) — and an explicit **"Approve → create N cards"** button (`POST /boards/:id/intake/:agentRunId/approve`). Nothing is persisted to the board until this is clicked — this is the human checkpoint, not a formality.
+  - **`succeeded`**: confirmation + card count. If the background manager review (kicked off right after approval) hasn't settled yet, shows "Manager is reviewing this breakdown…" instead of a board link, since the reviewed set can still replace the just-created card ids. Once settled, "View on board" navigates to `/board?highlight={ids}`.
+  - **`failed`**: the error text.
 
 ---
 
 ## 6. Agent Session Panel (shared component, appears in 5 places)
 
-Reused verbatim in: the board's "watch" dialog, the Approval Dialog's reviewer section, the card detail "View session" dialog, and the Intake Modal's running phase. This is the core "watch the AI work" experience and probably the most distinctive interaction surface in the product.
+Reused verbatim in: the board's "watch" dialog, the Approval Dialog's reviewer section, the card detail "View session" dialog, and the `/plan` page's conversation view. This is the core "watch the AI work" experience and probably the most distinctive interaction surface in the product.
 
 - Chat-style transcript: assistant messages (left, muted), human messages (right, primary color), tool calls (collapsible — tool name + input), tool results (collapsible — output/error), status lines (centered, muted)
 - Live indicator vs. "read-only playback" for completed runs
@@ -152,7 +163,7 @@ Reused verbatim in: the board's "watch" dialog, the Approval Dialog's reviewer s
 | Polling fallback | Board card list (4s), intake status (2s) |
 | Inline add/remove list editing | Acceptance criteria |
 | Inline answer-a-question form | Card questions |
-| Multi-step modal (form → live progress → result) | Intake |
+| Multi-turn conversation → explicit approval → result | Plan (`/plan`) |
 | High-stakes review-then-approve dialog | Approval Dialog |
 | Filter via button group | Docs list |
 | Graph visualization | Dependency graph |
@@ -163,7 +174,7 @@ These are the moments the UI exists to serve — everything else is visibility s
 
 1. **Approve a deploy** (Approval Dialog) — the only point a human gates code going live, and only for high-risk/architecture-touching cards
 2. **Answer a `QUESTION:`** (card detail, Activity tab) — an agent hit something it won't guess on
-3. **Review a planner decomposition** (Intake Modal result, then dragging cards `backlog → ready`) — nothing runs until a human promotes a card
+3. **Approve a planner decomposition** (`/plan`'s "Approve → create N cards", then dragging cards `backlog → ready`) — nothing exists on the board, let alone runs, until a human approves the plan and then promotes a card
 4. **Retry a blocked card** — after fixing whatever a human needed to fix
 5. **Interject into a live agent session** — redirect an in-progress agent without waiting for it to finish and fail
 

@@ -6,7 +6,7 @@ import { describe, expect, it } from "vitest";
 // Regression test for card 438646e5. infrastructure/docker/docker-compose.yml
 // used to hardcode POSTGRES_PASSWORD/DATABASE_URL as a bare literal
 // ("loopeng"), identical to the value documented in .env.example -- so
-// "the one real instance" this file deploys (see ARCHITECTURE.md) had its
+// "the one real instance" this file deploys (see docs/ARCHITECTURE.md) had its
 // actual production DB credential sitting in a committed file, reachable by
 // a plain read from any agent worktree regardless of what got stripped from
 // a spawned process's env (AGENT_ENV_DENYLIST in

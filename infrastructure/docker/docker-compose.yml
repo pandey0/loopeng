@@ -28,20 +28,74 @@ services:
     build:
       context: ../..
       dockerfile: infrastructure/docker/Dockerfile.api
+      args:
+        # Must match the host's `getent group docker` GID so the container's
+        # non-root user can use the docker.sock mount below -- see
+        # Dockerfile.api's comment on why this can't just run as root.
+        DOCKER_GID: ${DOCKER_GID:-999}
     environment:
       DATABASE_URL: postgresql://loopeng:${DB_PASSWORD:-loopeng}@postgres:5432/loopeng
       WEB_API_KEY: ${WEB_API_KEY:-change-me-web-api-key}
-      WIKI_REPO_PATH: /data/wiki-repo
+      # Was /data/wiki-repo (an isolated, empty Docker-managed named volume)
+      # -- real bug, not just a docs gap: the `docs` table lives in the same
+      # shared Postgres this container's DATABASE_URL points at, so any doc
+      # created by a native run is a row this container can see, pointing at
+      # git history this container could NOT -- confirmed live, a real
+      # implementer crashed on ENOENT reading a linked spec doc that only
+      # existed in the real host wiki-repo. Now points inside the
+      # HOST_REPO_ROOT bind mount below, the same real git-backed store every
+      # other instance (native or docker) reads and writes.
+      WIKI_REPO_PATH: ${HOST_REPO_ROOT}/data/wiki-repo
       API_PORT: 4000
-      # This is the one real instance -- the only place ORCHESTRATOR_ENABLED
-      # should be set. Agent worktrees running apps/api locally (e.g. `tsx
-      # watch` for manual UI verification) must never set this, or they'll
-      # start a second orchestrator racing this one over the same DATABASE_URL.
-      ORCHESTRATOR_ENABLED: "1"
+      # docker-compose and the native-supervised api (README.md "Starting the
+      # one real instance") are two ALTERNATIVE ways to run the one real
+      # instance -- never both at once. Both set ORCHESTRATOR_ENABLED against
+      # the same DATABASE_URL; running both simultaneously reproduces
+      # data/wiki-repo/wiki/duplicate-orchestrator-instances-incident.md (two
+      # dispatchers racing the same ready card). Deliberately NOT hardcoded
+      # "1" here (unlike the old version of this file) -- opt in per .env so
+      # picking this mode is a conscious choice, not a default that silently
+      # collides with a native instance someone also has running.
+      ORCHESTRATOR_ENABLED: ${ORCHESTRATOR_ENABLED:-}
+      # DooD (this container drives the *host's* docker daemon over the
+      # mounted socket below): TARGET_REPO_PATH must be the repo's path as
+      # the host daemon sees it, which only works if that path is bind-mounted
+      # into this container at the *identical* absolute path -- see the
+      # HOST_REPO_ROOT volume below. Also fixes the analyzer/implementer's
+      # repoPath resolution for the real dogfood project (docs/FLOWS.md §1b),
+      # which was previously invisible inside this container entirely.
+      TARGET_REPO_PATH: ${HOST_REPO_ROOT}
+      PROJECT_REPOS_PATH: ${HOST_REPO_ROOT}/data/repos
+      WORKTREES_PATH: ${HOST_REPO_ROOT}/data/worktrees
+      # /home/node, not /root -- this container runs as the non-root `node`
+      # user (see Dockerfile.api). Matches the mount targets below.
+      HOME: /home/node
     ports:
       - "${API_PORT:-4000}:4000"
     volumes:
-      - wiki-repo:/data/wiki-repo
+      # Real project/worktree git access, and DooD path identity (see
+      # TARGET_REPO_PATH above) -- host path and container path must match
+      # exactly, so this is a same-path bind, not a relocated one.
+      - ${HOST_REPO_ROOT}:${HOST_REPO_ROOT}
+      # Lets this container drive the host's docker daemon for the deploy
+      # step's `docker compose --build web` (packages/deploy-engine). Real
+      # privilege-escalation surface: anything with socket access is
+      # equivalent to root on the host. Only enable this mode with that
+      # understood -- see README.md's Docker section.
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ${DOCKER_CLI_HOST_PATH}:/usr/bin/docker:ro
+      - ${DOCKER_COMPOSE_PLUGIN_HOST_DIR}:/home/node/.docker/cli-plugins:ro
+      # The claude CLI itself: a host-specific, glibc-linked, auto-updating
+      # binary (see README.md) -- bind-mounted rather than baked into the
+      # image so it stays in sync with whatever version is installed on the
+      # host, and so the image doesn't carry a ~300MB binary.
+      - ${CLAUDE_CLI_HOST_SHARE_DIR}:${CLAUDE_CLI_HOST_SHARE_DIR}:ro
+      - ${CLAUDE_CLI_HOST_BIN}:/usr/local/bin/claude:ro
+      # OAuth session credentials, read-only. Sensitive: combined with the
+      # docker.sock mount above, anything that escapes this container gets
+      # both host-root-equivalent access and this Claude account's session
+      # token. Understand that before enabling this mode.
+      - ${CLAUDE_CREDENTIALS_HOST_PATH}:/home/node/.claude/.credentials.json:ro
     depends_on:
       postgres:
         condition: service_healthy
@@ -67,4 +121,3 @@ services:
 
 volumes:
   pgdata:
-  wiki-repo:

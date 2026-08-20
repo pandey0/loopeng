@@ -1,5 +1,38 @@
-FROM node:20-alpine AS base
+FROM node:20-bookworm-slim AS base
+# glibc, not alpine's musl -- both the claude CLI and the docker CLI bind-mounted
+# in at runtime (see docker-compose.yml) are glibc-linked host binaries and won't
+# run against musl. git is needed for real repo/worktree operations; ca-certificates
+# for git-over-https and the claude CLI's own network calls. `su` (already in
+# Debian's base via login/passwd) is what the entrypoint uses to drop from root
+# to the non-root `node` user after fixing up volume ownership.
+RUN apt-get update && apt-get install -y --no-install-recommends git ca-certificates wget && rm -rf /var/lib/apt/lists/*
 RUN corepack enable && corepack prepare pnpm@9.12.0 --activate
+
+# Every worktree under HOST_REPO_ROOT/data/worktrees was created by whatever
+# process ran createWorktree -- a native process on the host, or an earlier
+# container -- not this container's own `node` user, in general. Git's
+# ownership-mismatch heuristic doesn't reliably resolve "same uid, different
+# mount/container identity" as safe, and refuses every git operation in that
+# directory with "fatal: detected dubious ownership" until it's explicitly
+# trusted. Confirmed live: every Bash tool call an implementer ran that
+# touched git (`git log`, `git status` transitively) failed this way inside
+# a real worktree. --system (not --global) so it applies regardless of which
+# user ends up running git, without needing a per-user .gitconfig.
+RUN git config --system --add safe.directory '*'
+
+# The claude CLI refuses to run --dangerously-skip-permissions (the analyzer/
+# implementer/reviewer roles' bypassPermissions mode) as root -- confirmed
+# live: "--dangerously-skip-permissions cannot be used with root/sudo
+# privileges for security reasons". So this container must run as a non-root
+# user. node:20's image already ships one (`node`, uid/gid 1000) -- reused
+# here rather than creating a new one so it lines up with the common
+# host-uid-1000 case for the HOST_REPO_ROOT bind mount's file ownership.
+# DOCKER_GID must match the *host's* docker group (`getent group docker`) so
+# this user can actually use the /var/run/docker.sock bind mount -- set via
+# infrastructure/docker/.env, since that GID varies per machine.
+ARG DOCKER_GID=999
+RUN groupadd -g ${DOCKER_GID} hostdocker && usermod -aG hostdocker node
+
 WORKDIR /repo
 
 FROM base AS deps
@@ -30,6 +63,9 @@ COPY packages/gates packages/gates
 COPY packages/deploy-engine packages/deploy-engine
 COPY packages/orchestrator packages/orchestrator
 COPY apps/api apps/api
+COPY infrastructure/docker/docker-entrypoint.sh /docker-entrypoint.sh
+RUN chmod +x /docker-entrypoint.sh
 WORKDIR /repo/apps/api
 EXPOSE 4000
+ENTRYPOINT ["/docker-entrypoint.sh"]
 CMD ["pnpm", "start"]

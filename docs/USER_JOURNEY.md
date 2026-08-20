@@ -21,30 +21,31 @@ One continuous walkthrough, step by step: what you (the product owner) actually 
 
 ## Step 1 — You type the request
 
-**You do**: open the board, click "New request," type: *"Checkout crashes with a 500 for guest users — looks like the receipt email step assumes a logged-in user's email is always set. Fix it and add a test so it can't regress."*
+**You do**: click "New" (or "Plan" 💬 in the sidebar), landing on `/plan`, type: *"Checkout crashes with a 500 for guest users — looks like the receipt email step assumes a logged-in user's email is always set. Fix it and add a test so it can't regress."*
 
 **Under the hood**:
 - `POST /boards/:id/intake` (`apps/api/src/routes/intake.ts`) validates the input against `IntakeInputSchema`, confirms the board exists, then calls `startPlannerAgent(boardId, requestText)`.
-- That function inserts an `agent_runs` row (role `planner`, status `queued`) **first**, then returns `{ agentRunId, result }` — the HTTP response goes back to your browser as `202 { agentRunId }` immediately, without waiting for the agent to finish. Everything from here runs as a detached background task; a `Promise` chain (`result.then(...).catch(...)`) records the terminal outcome into a process-local `intakeOutcomes` map when it's done.
-- A real `claude` CLI subprocess spawns with the planner's system prompt, given read access to the repo. Its transcript streams into `agent_runs.transcript` (jsonb) incrementally via `makeTranscriptAppender` as it works.
+- That function inserts an `agent_runs` row (role `planner`, status `queued`) **first**, then returns `{ agentRunId, result }` — the HTTP response goes back to your browser as `202 { agentRunId }` immediately, without waiting for the agent to finish. Everything from here runs as a detached background task, and every bit of state (transcript, status) lands in `agent_runs` — nothing is held only in memory, so the conversation survives you navigating away or an API restart.
+- A real `claude` CLI subprocess spawns with the planner's system prompt, given read access to the repo. Its transcript streams into `agent_runs.transcript` (jsonb) incrementally via `makeTranscriptAppender` as it works. Unlike a one-shot generator, it may ask you a clarifying question before proposing anything — the conversation can run several rounds.
 
 ## Step 2 — You watch it think instead of staring at a spinner
 
-**You do**: the intake modal stays open, now rendering an `AgentSessionPanel` instead of a loading spinner, polling `GET /boards/:id/intake/:agentRunId` every 2 seconds.
+**You do**: `/plan?session={agentRunId}` renders an `AgentSessionPanel`, polling `GET /boards/:id/intake/:agentRunId` every 2 seconds.
 
 **Under the hood**:
 - The frontend also opens a WebSocket to `GET /agent-runs/:id/socket`. That route looks the run up in the API process's in-memory `sessionRegistry` (`Map<agentRunId, StreamingSession>`); since the run is live, it replays everything captured so far then streams new events as they arrive.
 - You see the planner actually read `apps/web/app/checkout/*`, find the email-send call, reason about the null case, and decide on a decomposition. This takes roughly 30–90 seconds for a request this size.
 
-## Step 3 — The decomposition lands, a manager reviews it, then you triage
+## Step 3 — A proposal comes back, you approve it, a manager reviews it
 
-**You do**: nothing yet — you just watch the epic and its child cards appear in the `backlog` column.
+**You do**: the status flips to `awaiting_approval`. A proposal card lists the exact epic + child cards the planner would create — nothing exists on the board yet. You click **"Approve → create N cards"**.
 
 **Under the hood**:
-- The planner's real output is parsed (`PlannerOutputError` thrown and surfaced as a `failed` outcome if it can't be parsed cleanly — fails closed rather than guessing), then persisted: one epic card ("Fix checkout 500 for guest users"), child cards like "Guard null email before receipt send," "Add regression test: guest checkout completes without email," each linked to a freshly-written spec doc (`docs` table, doc-engine commits it to the git-backed wiki repo).
-- An `event_log` row (`card.intake_decomposed`) fires.
-- Immediately after, still in the same background chain, `runManagerAgent(epicCardId)` runs — a read-only tech-manager review of the fresh breakdown (no worktree of its own; it just reads the main checkout). It might merge two overly-granular child cards or flag one as higher risk than the planner guessed. Another `event_log` row (`card.epic_reviewed`) fires, and *this* manager-adjusted card list is what the intake outcome finally reports as `succeeded` — not the planner's raw first draft.
-- You now poll `GET /boards/:id/intake/:agentRunId`, see `status: "succeeded"`, and the modal closes. The cards are sitting in `backlog`.
+- While `awaiting_approval`, `GET /boards/:id/intake/:agentRunId` re-parses the planner's last transcript event (`parsePlannerOutput`) into a `PlannerProposal` on every poll — nothing is persisted yet, so this is cheap to keep recomputing.
+- Clicking approve calls `POST /boards/:id/intake/:agentRunId/approve`, which runs `approvePlannerPlan` — this is the actual persistence step: one epic card ("Fix checkout 500 for guest users"), child cards like "Guard null email before receipt send," "Add regression test: guest checkout completes without email," each linked to a freshly-written spec doc (`docs` table, doc-engine commits it to the git-backed wiki repo). Output is parsed the same fail-closed way (`PlannerOutputError` surfaces as a `400` rather than guessing).
+- An `event_log` row (`card.intake_decomposed`) fires, attributed to you (the verified human actor), not a hardcoded value.
+- Still in the same request, `runManagerAgent(epicCardId)` kicks off in the background (not awaited — the response returns immediately with the cards you just approved) — a read-only tech-manager review of the fresh breakdown (no worktree of its own; it just reads the main checkout). It might merge two overly-granular child cards or flag one as higher risk than the planner guessed. Another `event_log` row (`card.epic_reviewed`) fires when it finishes, and *this* manager-adjusted card list is what a later poll of `GET /boards/:id/intake/:agentRunId` reports once `pendingManagerReview` clears — not the planner's raw first draft.
+- The cards are sitting in `backlog`, visible on `/board` right away; the manager's adjustment (if any) lands moments later.
 
 ## Step 4 — You promote the card that matters right now
 
@@ -111,8 +112,9 @@ One continuous walkthrough, step by step: what you (the product owner) actually 
 ```
 you register a project (local path or clone from GitHub) -> board created
   -> analyzer builds a project brief in the background -> every later agent gets it as context
-you type a request
-  -> planner (live-streamed) drafts spec + decomposition -> backlog
+you type a request on /plan
+  -> planner (live-streamed) converses, drafts a proposal -> awaiting_approval
+you approve the proposal -> spec + decomposition persisted -> backlog
   -> manager reviews the epic's breakdown -> backlog (adjusted)
 you promote a card -> ready
   -> event trigger dispatches -> worktree created -> implementer writes code (live-streamed)

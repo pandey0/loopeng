@@ -12,7 +12,7 @@ import {
   docs as docsTable,
   projects,
 } from "@loopeng/db";
-import { createDoc, listDocs } from "@loopeng/doc-engine";
+import { createDoc, getDoc, listDocs, updateDoc } from "@loopeng/doc-engine";
 
 type Card = typeof cards.$inferSelect;
 import { getActiveWorktree, getRepoDiff, resolveRepoRoot } from "@loopeng/worktree-manager";
@@ -897,15 +897,30 @@ async function executeProjectAnalyzerAgent(
   }
 
   const slug = `project-brief-${project.id}`;
-  const doc = await createDoc({
-    slug,
-    title: `${project.name} — project brief`,
-    docType: "brief",
-    content: stripPreamble(result.resultText),
-    summary: `Auto-generated overview of ${project.name}'s stack, architecture, and conventions.`,
-    tags: ["project-brief"],
-    message: "analyzer agent: generate project brief",
-  });
+  const content = stripPreamble(result.resultText);
+  const summary = `Auto-generated overview of ${project.name}'s stack, architecture, and conventions.`;
+  // A re-analyze (POST /projects/:id/reanalyze) hits this same slug a second
+  // time -- createDoc alone would always insert, throwing on docs_slug_unique
+  // for any project that already has a brief (confirmed live: every
+  // re-analyze of an already-analyzed project failed this way, the actual
+  // root cause behind this project's stuck briefStatus, not the analyzer run
+  // itself). updateDoc is the existing doc-engine primitive for "this doc
+  // already exists, replace its content" -- just wasn't wired in here.
+  const existingBrief = await getDoc(slug);
+  const doc = existingBrief
+    ? await updateDoc(slug, { content, summary, message: "analyzer agent: refresh project brief" }).then((updated) => {
+        if (!updated) throw new Error(`failed to update existing brief doc: ${slug}`);
+        return updated;
+      })
+    : await createDoc({
+        slug,
+        title: `${project.name} — project brief`,
+        docType: "brief",
+        content,
+        summary,
+        tags: ["project-brief"],
+        message: "analyzer agent: generate project brief",
+      });
 
   await db
     .update(agentRuns)
@@ -918,13 +933,32 @@ async function executeProjectAnalyzerAgent(
 
 // Convenience wrapper for callers (API route) that just want to fire this off
 // without holding the agentRunId — errors are swallowed into briefStatus
-// "failed" (already persisted by executeProjectAnalyzerAgent), not thrown,
-// since this always runs detached from an HTTP response.
+// "failed" (already persisted by executeProjectAnalyzerAgent for a "soft"
+// isError result), not thrown, since this always runs detached from an HTTP
+// response.
 export async function runProjectAnalyzerAgent(project: { id: string; name: string; repoPath: string }): Promise<void> {
+  let handle: ProjectAnalyzerRunHandle | undefined;
   try {
-    await startProjectAnalyzerAgent(project).then((h) => h.result);
+    handle = await startProjectAnalyzerAgent(project);
+    await handle.result;
   } catch (err) {
     console.error(`[analyzer] project ${project.id} failed:`, err);
+    if (handle) {
+      // executeProjectAnalyzerAgent only marks agent_runs "failed" for a
+      // soft isError result -- a *thrown* exception (CLI spawn failure, MCP
+      // config error, etc.) skips that code entirely and used to leave this
+      // row orphaned at status "running" forever, the same failure mode as
+      // an API restart mid-run (docs/ARCHITECTURE.md §5), except here
+      // nothing crashed -- just this one run. Observed live on this repo's
+      // own dogfood project: one orphaned "running" agent_runs row from a
+      // failed re-analyze, while briefStatus flipped to "failed" and
+      // briefDocId stayed pinned to the prior successful run's doc.
+      await db
+        .update(agentRuns)
+        .set({ status: "failed", finishedAt: new Date() })
+        .where(eq(agentRuns.id, handle.agentRunId))
+        .catch(() => {});
+    }
     await db
       .update(projects)
       .set({ briefStatus: "failed" })
